@@ -1,15 +1,15 @@
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class LegacyRoute(str, Enum):
+class LegacyRoute(StrEnum):
     BBS = "BBS"
     WIKI = "WIKI"
     DATA = "DATA"
     IMAGE = "IMAGE"
 
 
-class LikeType(str, Enum):
+class LikeType(StrEnum):
     GOOD = "good"
     BAD = "bad"
 
@@ -26,7 +26,12 @@ class Thread:
     updated_at: str = ""
     n_res: int = 0
     n_like: int = 0
-    file_keys: list[str] = field(default_factory=list)
+    filedata: list[str] = field(default_factory=list)
+    is_edited: bool = False
+    is_deleted: bool = False
+    v1_id: str | None = None
+    v1_user_id: str | None = None
+    v1_user_name: str | None = None
 
 
 @dataclass(slots=True)
@@ -41,6 +46,13 @@ class Log:
     response_to: str | None = None
     n_res: int = 0
     n_like: int = 0
+    is_edited: bool = False
+    is_deleted: bool = False
+    v1_id: str | None = None
+    v1_res_id: str | None = None
+    v1_thread_id: str | None = None
+    v1_user_id: str | None = None
+    v1_user_name: str | None = None
 
 
 @dataclass(slots=True)
@@ -49,6 +61,7 @@ class Like:
     user_id: str
     like_type: LikeType
     created_at: str = ""
+    is_deleted: bool = False
 
 
 @dataclass(slots=True)
@@ -59,4 +72,3 @@ class UserProfile:
     email_verified: bool
     version: str = "2"
     v1_password: str | None = None
-
