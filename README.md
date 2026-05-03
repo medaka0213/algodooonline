@@ -2,6 +2,8 @@
 
 2019 年の `../Algon2-APP` と `../Algon2-API` を、Python + `uv` 前提で統合した Algodoo Online のモノレポです。
 
+旧仕様の受け入れ条件は [`SPEC.md`](SPEC.md) に固定しています。画面・認証・API・データ移行はこの仕様との差分がなくなるまで完了扱いにしません。
+
 ## 方針
 
 - UI と API は `FastAPI + Jinja2` で統合し、Lambda 上で 1 アプリとして動かす

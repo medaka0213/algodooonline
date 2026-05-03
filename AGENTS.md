@@ -4,6 +4,8 @@
 
 This repository is the Python-first rewrite of the legacy Algon2 React + Chalice application.
 
+`SPEC.md` is the source of truth for preserving legacy behavior. Read it before changing user-facing routes, screens, API payloads, auth behavior, DynamoDB records, file handling, or local integration tests.
+
 The local app must behave like the target product, not like a migration status page. Keep user-facing screens focused on the actual Algodoo Online workflows: routes, thread lists, thread detail, responses, replies, likes, search, simple local session, and attachment references.
 
 ## Stack
@@ -52,6 +54,7 @@ python3 -B -c "import ast, pathlib; [ast.parse(p.read_text()) for p in pathlib.P
 ## Development Rules
 
 - Treat the Docker Compose app as the local integration target.
+- Treat `SPEC.md` as the acceptance criteria. Do not replace legacy UI or API behavior with a newly invented product shape unless the spec is updated from the legacy repositories first.
 - Keep the main screen as a usable application screen.
 - Do not add migration notes, schema descriptions, access pattern docs, or architecture explanations to the user-facing app UI.
 - If a feature changes UI behavior, update `scripts/smoke_local.py` to cover the expected flow.
