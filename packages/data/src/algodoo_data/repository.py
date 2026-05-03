@@ -1,22 +1,34 @@
-from collections import Counter
-from dataclasses import asdict
-from datetime import UTC, datetime
+import hashlib
 import time
+from collections import Counter
+from datetime import UTC, datetime
+from operator import attrgetter
 
+from algodoo_domain.models import LegacyRoute, Like, LikeType, Log, Thread, UserProfile
 from ddb_single import Query
 
-from algodoo_domain.models import LegacyRoute, Like, LikeType, Log, Thread
 from algodoo_data.single_table import (
+    TABLE,
     LikeRecord,
     LogRecord,
-    TABLE,
     ThreadRecord,
+    UserRecord,
     create_log_id,
     create_thread_id,
     like_to_record,
     log_to_record,
     thread_to_record,
+    user_to_record,
 )
+
+SORT_KEYS = {
+    "NEWEST_UPDATED",
+    "NEWEST_CREATED",
+    "OLDEST_UPDATED",
+    "OLDEST_CREATED",
+    "BEST",
+    "MOST_RESPONSED",
+}
 
 
 def utcnow() -> str:
@@ -40,6 +52,10 @@ def init_table() -> None:
     raise RuntimeError("failed to initialize or query the single table") from last_error
 
 
+def _bool(item: dict, key: str) -> bool:
+    return bool(item.get(key, False))
+
+
 def thread_from_item(item: dict) -> Thread:
     return Thread(
         route=LegacyRoute(item["route"].upper()),
@@ -47,12 +63,17 @@ def thread_from_item(item: dict) -> Thread:
         user_name=item.get("user_name") or "anonymous",
         title=item.get("title") or "",
         content=item.get("content") or "",
-        user_id=item.get("user_id"),
+        user_id=item.get("user_id") or "anonymous",
         created_at=item.get("created_at") or "",
         updated_at=item.get("updated_at") or "",
         n_res=int(item.get("n_res") or 0),
         n_like=int(item.get("n_like") or 0),
-        file_keys=item.get("file_keys") or [],
+        filedata=item.get("filedata") or item.get("file_keys") or [],
+        is_edited=_bool(item, "is_edited"),
+        is_deleted=_bool(item, "is_deleted"),
+        v1_id=item.get("v1_id"),
+        v1_user_id=item.get("v1_user_id"),
+        v1_user_name=item.get("v1_user_name"),
     )
 
 
@@ -65,28 +86,90 @@ def log_from_item(item: dict) -> Log:
         content=item.get("content") or "",
         created_at=item.get("created_at") or "",
         updated_at=item.get("updated_at") or "",
-        response_to=item.get("response_to"),
+        response_to=item.get("response_to") or None,
         n_res=int(item.get("n_res") or 0),
         n_like=int(item.get("n_like") or 0),
+        is_edited=_bool(item, "is_edited"),
+        is_deleted=_bool(item, "is_deleted"),
+        v1_id=item.get("v1_id"),
+        v1_res_id=item.get("v1_res_id"),
+        v1_thread_id=item.get("v1_thread_id"),
+        v1_user_id=item.get("v1_user_id"),
+        v1_user_name=item.get("v1_user_name"),
     )
 
 
-def list_threads(route: LegacyRoute, query_text: str | None = None) -> list[Thread]:
+def user_from_item(item: dict) -> UserProfile:
+    return UserProfile(
+        username=item["username"],
+        sub=item.get("sub") or item["username"],
+        email=item.get("email") or "",
+        email_verified=bool(item.get("email_verified")),
+        version=item.get("version") or "2",
+        v1_password=item.get("v1_password"),
+    )
+
+
+def _tokens(query_text: str | None) -> list[str]:
+    if not query_text:
+        return []
+    return [token.lower() for token in query_text.replace("　", " ").split() if token.strip()]
+
+
+def _matches(text: str, tokens: list[str]) -> bool:
+    lowered = text.lower()
+    return all(token in lowered for token in tokens)
+
+
+def _sort_threads(threads: list[Thread], sort: str | None) -> list[Thread]:
+    selected = sort if sort in SORT_KEYS else "NEWEST_UPDATED"
+    reverse = selected in {"NEWEST_UPDATED", "NEWEST_CREATED", "BEST", "MOST_RESPONSED"}
+    if selected.endswith("UPDATED"):
+        key = attrgetter("updated_at")
+    elif selected.endswith("CREATED"):
+        key = attrgetter("created_at")
+    elif selected == "BEST":
+        key = attrgetter("n_like")
+    else:
+        key = attrgetter("n_res")
+    return sorted(threads, key=key, reverse=reverse)
+
+
+def _sort_logs(logs: list[Log], sort: str | None) -> list[Log]:
+    selected = sort if sort in SORT_KEYS else "NEWEST_CREATED"
+    reverse = selected in {"NEWEST_UPDATED", "NEWEST_CREATED", "BEST", "MOST_RESPONSED"}
+    if selected.endswith("UPDATED"):
+        key = attrgetter("updated_at")
+    elif selected.endswith("CREATED"):
+        key = attrgetter("created_at")
+    elif selected == "BEST":
+        key = attrgetter("n_like")
+    else:
+        key = attrgetter("n_res")
+    return sorted(logs, key=key, reverse=reverse)
+
+
+def list_threads(
+    route: LegacyRoute,
+    query_text: str | None = None,
+    sort: str | None = None,
+    include_deleted: bool = False,
+) -> list[Thread]:
     items = query().model(ThreadRecord).search(ThreadRecord.route.eq(route.value))
     threads = [thread_from_item(item) for item in items]
-    if query_text:
-        normalized = query_text.lower()
+    if not include_deleted:
+        threads = [thread for thread in threads if not thread.is_deleted]
+    tokens = _tokens(query_text)
+    if tokens:
         threads = [
             thread
             for thread in threads
-            if normalized in thread.title.lower()
-            or normalized in thread.content.lower()
-            or normalized in thread.user_name.lower()
+            if _matches(f"{thread.title}\n{thread.content}", tokens)
         ]
-    return sorted(threads, key=lambda item: item.updated_at, reverse=True)
+    return _sort_threads(threads, sort)
 
 
-def get_thread(route: LegacyRoute, thread_id: str) -> Thread | None:
+def get_thread(route: LegacyRoute, thread_id: str, include_deleted: bool = False) -> Thread | None:
     items = query().model(ThreadRecord).search(
         ThreadRecord.thread_id.eq(thread_id),
         ThreadRecord.route.eq(route.value),
@@ -94,21 +177,38 @@ def get_thread(route: LegacyRoute, thread_id: str) -> Thread | None:
     )
     if not items:
         return None
-    return thread_from_item(items[0])
+    thread = thread_from_item(items[0])
+    if thread.is_deleted and not include_deleted:
+        return None
+    return thread
 
 
-def list_logs(thread_id: str) -> list[Log]:
+def list_logs(
+    thread_id: str,
+    query_text: str | None = None,
+    sort: str | None = None,
+    include_deleted: bool = True,
+) -> list[Log]:
     items = query().model(LogRecord).search(LogRecord.thread_id.eq(thread_id))
     logs = [log_from_item(item) for item in items]
-    return sorted(logs, key=lambda item: item.created_at)
+    if not include_deleted:
+        logs = [log for log in logs if not log.is_deleted]
+    tokens = _tokens(query_text)
+    if tokens:
+        matched = {log.log_id for log in logs if _matches(log.content, tokens)}
+        matched.update(log.response_to for log in logs if log.log_id in matched and log.response_to)
+        logs = [log for log in logs if log.log_id in matched]
+    return _sort_logs(logs, sort)
 
 
-def list_responses(thread_id: str, log_id: str) -> list[Log]:
+def list_responses(thread_id: str, log_id: str, include_deleted: bool = True) -> list[Log]:
     items = query().model(LogRecord).search(
         LogRecord.thread_id.eq(thread_id),
         LogRecord.response_to.eq(log_id),
     )
     logs = [log_from_item(item) for item in items]
+    if not include_deleted:
+        logs = [log for log in logs if not log.is_deleted]
     return sorted(logs, key=lambda item: item.created_at)
 
 
@@ -125,64 +225,53 @@ def get_log(thread_id: str, log_id: str) -> Log | None:
 
 def get_like_summary(post_id: str) -> dict[str, int]:
     items = query().model(LikeRecord).search(LikeRecord.post_id.eq(post_id))
-    counts = Counter(item["like_type"] for item in items)
+    counts = Counter(item["like_type"] for item in items if not item.get("is_deleted"))
     good = counts.get(LikeType.GOOD.value, 0)
     bad = counts.get(LikeType.BAD.value, 0)
+    return {"n_good": good, "n_bad": bad, "n_total": good - bad}
+
+
+def get_own_like(post_id: str, user_id: str) -> dict:
+    items = query().model(LikeRecord).search(
+        LikeRecord.post_id.eq(post_id),
+        LikeRecord.user_id.eq(user_id),
+        limit=1,
+    )
+    if not items or items[0].get("is_deleted"):
+        return {}
     return {
-        "n_good": good,
-        "n_bad": bad,
-        "n_total": good - bad,
+        "post_id": items[0]["post_id"],
+        "user_id": items[0]["user_id"],
+        "type": items[0]["like_type"],
+        "isDeleted": False,
     }
 
 
-def _persist_thread_counts(thread_id: str) -> None:
+def _persist_thread_counts(thread_id: str, touch_updated: bool = True) -> None:
     items = query().model(ThreadRecord).search(ThreadRecord.thread_id.eq(thread_id), limit=1)
     if not items:
         return
     item = items[0]
     route = LegacyRoute(item["route"].upper())
     summary = get_like_summary(thread_id)
-    logs = list_logs(thread_id)
-    updated = Thread(
-        route=route,
-        thread_id=item["thread_id"],
-        user_name=item.get("user_name") or "anonymous",
-        title=item.get("title") or "",
-        content=item.get("content") or "",
-        user_id=item.get("user_id"),
-        created_at=item.get("created_at") or "",
-        updated_at=utcnow(),
-        n_res=len(logs),
-        n_like=summary["n_total"],
-        file_keys=item.get("file_keys") or [],
-    )
+    logs = list_logs(thread_id, include_deleted=False)
+    updated = thread_from_item(item)
+    updated.n_res = len(logs)
+    updated.n_like = summary["n_total"]
+    if touch_updated:
+        updated.updated_at = utcnow()
+    updated.route = route
     query().model(thread_to_record(updated)).update()
 
 
 def _persist_log_counts(thread_id: str, log_id: str) -> None:
-    items = query().model(LogRecord).search(
-        LogRecord.log_id.eq(log_id),
-        LogRecord.thread_id.eq(thread_id),
-        limit=1,
-    )
-    if not items:
+    current = get_log(thread_id, log_id)
+    if current is None:
         return
-    item = items[0]
     summary = get_like_summary(log_id)
-    responses = list_responses(thread_id, log_id)
-    updated = Log(
-        thread_id=item["thread_id"],
-        log_id=item["log_id"],
-        user_id=item.get("user_id") or "anonymous",
-        user_name=item.get("user_name") or "anonymous",
-        content=item.get("content") or "",
-        created_at=item.get("created_at") or "",
-        updated_at=utcnow(),
-        response_to=item.get("response_to"),
-        n_res=len(responses),
-        n_like=summary["n_total"],
-    )
-    query().model(log_to_record(updated)).update()
+    current.n_like = summary["n_total"]
+    current.n_res = len(list_responses(thread_id, log_id, include_deleted=False))
+    query().model(log_to_record(current)).update()
 
 
 def create_thread(
@@ -191,6 +280,7 @@ def create_thread(
     content: str,
     user_name: str,
     user_id: str | None = None,
+    filedata: list[str] | None = None,
     file_keys: list[str] | None = None,
 ) -> Thread:
     now = utcnow()
@@ -200,10 +290,10 @@ def create_thread(
         user_name=user_name,
         title=title,
         content=content,
-        user_id=user_id,
+        user_id=user_id or user_name,
         created_at=now,
         updated_at=now,
-        file_keys=file_keys or [],
+        filedata=filedata if filedata is not None else file_keys or [],
     )
     record = thread_to_record(thread)
     query().model(record).create()
@@ -215,26 +305,19 @@ def update_thread_details(
     thread_id: str,
     title: str,
     content: str,
-    file_keys: list[str] | None = None,
+    filedata: list[str] | None = None,
 ) -> Thread | None:
     current = get_thread(route, thread_id)
     if current is None:
         return None
-    updated = Thread(
-        route=current.route,
-        thread_id=current.thread_id,
-        user_name=current.user_name,
-        title=title,
-        content=content,
-        user_id=current.user_id,
-        created_at=current.created_at,
-        updated_at=utcnow(),
-        n_res=current.n_res,
-        n_like=current.n_like,
-        file_keys=file_keys if file_keys is not None else current.file_keys,
-    )
-    query().model(thread_to_record(updated)).update()
-    return updated
+    current.title = title
+    current.content = content
+    if filedata is not None:
+        current.filedata = filedata
+    current.updated_at = utcnow()
+    current.is_edited = True
+    query().model(thread_to_record(current)).update()
+    return current
 
 
 def create_log(
@@ -253,7 +336,7 @@ def create_log(
         content=content,
         created_at=now,
         updated_at=now,
-        response_to=response_to,
+        response_to=response_to or None,
     )
     record = log_to_record(log)
     query().model(record).create()
@@ -267,85 +350,152 @@ def update_log_details(thread_id: str, log_id: str, content: str) -> Log | None:
     current = get_log(thread_id, log_id)
     if current is None:
         return None
-    updated = Log(
-        thread_id=current.thread_id,
-        log_id=current.log_id,
-        user_id=current.user_id,
-        user_name=current.user_name,
-        content=content,
-        created_at=current.created_at,
-        updated_at=utcnow(),
-        response_to=current.response_to,
-        n_res=current.n_res,
-        n_like=current.n_like,
-    )
-    query().model(log_to_record(updated)).update()
-    return updated
-
-
-def _delete_likes(post_id: str) -> None:
-    items = query().model(LikeRecord).search(LikeRecord.post_id.eq(post_id))
-    for item in items:
-        query().model(LikeRecord).delete_by_unique(item["like_key"])
+    current.content = content
+    current.updated_at = utcnow()
+    current.is_edited = True
+    query().model(log_to_record(current)).update()
+    return current
 
 
 def delete_log(thread_id: str, log_id: str) -> None:
     target = get_log(thread_id, log_id)
     if target is None:
         return
-
-    logs_to_delete = [
-        log for log in list_logs(thread_id) if log.log_id == log_id or log.response_to == log_id
-    ]
-    for log in logs_to_delete:
-        _delete_likes(log.log_id)
-        query().model(LogRecord).delete_by_unique(log.log_id)
-
+    target.is_deleted = True
+    target.updated_at = utcnow()
+    query().model(log_to_record(target)).update()
     _persist_thread_counts(thread_id)
     if target.response_to:
         _persist_log_counts(thread_id, target.response_to)
 
 
 def delete_thread(route: LegacyRoute, thread_id: str) -> None:
-    if get_thread(route, thread_id) is None:
+    target = get_thread(route, thread_id, include_deleted=True)
+    if target is None:
         return
+    target.is_deleted = True
+    target.updated_at = utcnow()
+    query().model(thread_to_record(target)).update()
     for log in list_logs(thread_id):
-        _delete_likes(log.log_id)
-        query().model(LogRecord).delete_by_unique(log.log_id)
-    _delete_likes(thread_id)
-    query().model(ThreadRecord).delete_by_unique(thread_id)
+        log.is_deleted = True
+        query().model(log_to_record(log)).update()
 
 
 def create_like(post_id: str, user_id: str, like_type: LikeType) -> dict[str, int]:
-    like = Like(
-        post_id=post_id,
-        user_id=user_id,
-        like_type=like_type,
-        created_at=utcnow(),
-    )
-    record = like_to_record(like)
-    query().model(record).update()
+    like = Like(post_id=post_id, user_id=user_id, like_type=like_type, created_at=utcnow())
+    query().model(like_to_record(like)).update()
+    _refresh_post_like_counts(post_id)
+    return get_like_summary(post_id)
+
+
+def delete_like(post_id: str, user_id: str) -> dict[str, int]:
+    like = get_own_like(post_id, user_id)
+    if like:
+        deleted = Like(
+            post_id=post_id,
+            user_id=user_id,
+            like_type=LikeType(like["type"]),
+            created_at=utcnow(),
+            is_deleted=True,
+        )
+        query().model(like_to_record(deleted)).update()
+    _refresh_post_like_counts(post_id)
+    return get_like_summary(post_id)
+
+
+def _refresh_post_like_counts(post_id: str) -> None:
     if post_id.count("_") >= 2:
         thread_id = post_id.rsplit("_", 1)[0]
         _persist_log_counts(thread_id, post_id)
-        _persist_thread_counts(thread_id)
+        _persist_thread_counts(thread_id, touch_updated=False)
     else:
-        _persist_thread_counts(post_id)
-    return get_like_summary(post_id)
+        _persist_thread_counts(post_id, touch_updated=False)
+
+
+def create_user(
+    username: str,
+    email: str,
+    sub: str | None = None,
+    email_verified: bool = True,
+    v1_password: str | None = None,
+) -> UserProfile:
+    user = UserProfile(
+        username=username,
+        sub=sub or f"local-{username}",
+        email=email,
+        email_verified=email_verified,
+        version="2",
+        v1_password=v1_password,
+    )
+    query().model(user_to_record(user)).update()
+    return user
+
+
+def get_user(username: str) -> UserProfile | None:
+    items = query().model(UserRecord).search(UserRecord.username.eq(username), limit=1)
+    if not items:
+        return None
+    return user_from_item(items[0])
+
+
+def signin_user(username: str, password: str) -> dict[str, bool]:
+    user = get_user(username)
+    if user is None:
+        return {"result": True, "isV2": True, "isV1": False}
+    if user.version == "1" or user.v1_password:
+        digest = hashlib.sha512(password.encode()).hexdigest()
+        return {"result": True, "isV2": False, "isV1": user.v1_password == digest}
+    return {"result": True, "isV2": True, "isV1": False}
+
+
+def update_user_from_token(id_token: str) -> UserProfile:
+    username = id_token.removeprefix("local-token-") or "anonymous"
+    user = get_user(username)
+    if user is None:
+        user = create_user(username=username, email=f"{username}@local.invalid")
+    return user
 
 
 def seed_demo_data() -> None:
     if TABLE.all_items(pk_only=True):
         return
 
+    create_user(username="demo-user", email="demo@example.invalid", sub="user-demo")
     created_threads: list[Thread] = []
-    for route, title, content in [
-        (LegacyRoute.BBS, "Algodoo 作品相談スレッド", "シーン作成、スクリプト、物理挙動の相談はこちら。"),
-        (LegacyRoute.WIKI, "よく使う操作メモ", "ツール、ショートカット、素材管理のメモをまとめます。"),
-        (LegacyRoute.DATA, "サンプルデータ置き場", "PHZ や画像メタデータの共有に使う場所です。"),
+    for route, title, content, files in [
+        (
+            LegacyRoute.BBS,
+            "Algodoo 作品相談スレッド",
+            "シーン作成、スクリプト、物理挙動の相談はこちら。",
+            [],
+        ),
+        (
+            LegacyRoute.WIKI,
+            "よく使う操作メモ",
+            "## 操作メモ\n\nツール、ショートカット、素材管理のメモをまとめます。",
+            [],
+        ),
+        (
+            LegacyRoute.IMAGE,
+            "画像つき作品紹介",
+            "画像を添えて作品の見た目を共有します。",
+            ["https://placehold.co/640x360.jpg?text=Algodoo"],
+        ),
+        (
+            LegacyRoute.DATA,
+            "サンプルデータ置き場",
+            "PHZ や PHN の共有に使う場所です。",
+            ["DATA/sample.phz", "DATA/sample_thumb.png"],
+        ),
     ]:
         created_threads.append(
-            create_thread(route=route, title=title, content=content, user_name="demo-user")
+            create_thread(
+                route=route,
+                title=title,
+                content=content,
+                user_name="demo-user",
+                filedata=files,
+            )
         )
 
     first_thread = created_threads[0]
@@ -368,8 +518,54 @@ def seed_demo_data() -> None:
 
 
 def thread_payload(thread: Thread) -> dict:
-    return asdict(thread) | {"route": thread.route.value}
+    return {
+        "route": thread.route.value,
+        "thread_id": thread.thread_id,
+        "updated_at": thread.updated_at,
+        "created_at": thread.created_at,
+        "user_id": thread.user_id,
+        "user_name": thread.user_name,
+        "title": thread.title,
+        "content": thread.content,
+        "nRes": thread.n_res,
+        "nLike": thread.n_like,
+        "filedata": thread.filedata,
+        "file_keys": thread.filedata,
+        "isEdited": thread.is_edited,
+        "isDeleted": thread.is_deleted,
+        "v1_id": thread.v1_id,
+        "v1_userID": thread.v1_user_id,
+        "v1_userName": thread.v1_user_name,
+    }
 
 
 def log_payload(log: Log) -> dict:
-    return asdict(log)
+    return {
+        "thread_id": log.thread_id,
+        "log_id": log.log_id,
+        "response_to": log.response_to or "",
+        "updated_at": log.updated_at,
+        "created_at": log.created_at,
+        "user_id": log.user_id,
+        "user_name": log.user_name,
+        "content": log.content,
+        "nRes": log.n_res,
+        "nLike": log.n_like,
+        "isEdited": log.is_edited,
+        "isDeleted": log.is_deleted,
+        "v1_id": log.v1_id,
+        "v1_resID": log.v1_res_id,
+        "v1_threadID": log.v1_thread_id,
+        "v1_userID": log.v1_user_id,
+        "v1_userName": log.v1_user_name,
+    }
+
+
+def user_payload(user: UserProfile) -> dict:
+    return {
+        "Username": user.username,
+        "sub": user.sub,
+        "email": user.email,
+        "email_verified": user.email_verified,
+        "version": user.version,
+    }
