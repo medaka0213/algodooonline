@@ -1,0 +1,34 @@
+[project]
+name = "algodooonline-workspace"
+version = "0.1.0"
+description = "Monorepo workspace for refactoring Algon2 APP/API into a Python-first serverless stack."
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5",
+  "ruff>=0.11.0",
+]
+
+[tool.uv.workspace]
+members = ["apps/*", "packages/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+ignore = ["B008"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/algodooonline_workspace"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/algodooonline_workspace"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+

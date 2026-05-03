@@ -1,0 +1,24 @@
+[project]
+name = "algodoo-data"
+version = "0.1.0"
+description = "DynamoDB data access layer for algodooonline."
+requires-python = ">=3.12"
+dependencies = [
+  "algodoo-domain",
+  "boto3>=1.34.79",
+  "ddb-single",
+]
+
+[tool.uv.sources]
+algodoo-domain = { workspace = true }
+ddb-single = { url = "https://github.com/medaka0213/DynamoDB-SingleTable/archive/aa24e2bc87f515d2aeb0f614d327d55e08a3c210.zip" }
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

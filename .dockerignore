@@ -1,0 +1,10 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+vendor/ddb-single/.git
+vendor/ddb-single/.codex
+vendor/ddb-single/.vscode
+vendor/ddb-single/tests
+vendor/ddb-single/docs_src/_build

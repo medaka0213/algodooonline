@@ -1,0 +1,23 @@
+services:
+  app:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    working_dir: /app
+    command: ["sh", "/app/scripts/start-dev.sh"]
+    environment:
+      APP_NAME: algodooonline
+      AWS_REGION: ap-northeast-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      DDB_TABLE_NAME: algodoo-main-local
+      DDB_ENDPOINT_URL: http://127.0.0.1:8001
+      SEED_DEMO_DATA: "true"
+      UV_LINK_MODE: copy
+    ports:
+      - "8080:8000"
+      - "8001:8001"
+    volumes:
+      - .:/app
+      - uv-cache:/root/.cache/uv
+
+volumes:
+  uv-cache:

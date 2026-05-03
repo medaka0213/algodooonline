@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Algodoo Online</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f8fb;
+        --surface: #ffffff;
+        --surface-alt: #eef3f7;
+        --line: #cfd8e3;
+        --line-strong: #aebccc;
+        --text: #172330;
+        --muted: #637387;
+        --accent: #006d77;
+        --accent-strong: #004f58;
+        --warn: #945400;
+        --danger: #a33838;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .app-shell {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        min-height: 100vh;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 14px 24px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        white-space: nowrap;
+      }
+
+      .brand-title {
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .brand-subtitle {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .route-tabs {
+        display: flex;
+        gap: 4px;
+        overflow-x: auto;
+      }
+
+      .session-form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .session-form input {
+        width: 150px;
+        border: 1px solid var(--line-strong);
+        border-radius: 4px;
+        padding: 7px 9px;
+      }
+
+      .route-tab {
+        min-width: 64px;
+        padding: 8px 12px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .route-tab[aria-current="page"] {
+        border-color: var(--accent);
+        background: #e5f2f4;
+        color: var(--accent-strong);
+        font-weight: 700;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+        min-height: 0;
+      }
+
+      .thread-list {
+        border-right: 1px solid var(--line);
+        background: var(--surface);
+        min-height: calc(100vh - 57px);
+      }
+
+      .list-header,
+      .detail-header {
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .list-header {
+        display: grid;
+        gap: 12px;
+      }
+
+      .section-title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .thread-items {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .thread-item {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .thread-link {
+        display: block;
+        padding: 16px 20px;
+      }
+
+      .thread-link:hover,
+      .thread-link[aria-current="page"] {
+        background: var(--surface-alt);
+      }
+
+      .thread-title {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 700;
+        line-height: 1.35;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .detail {
+        min-width: 0;
+      }
+
+      .detail-header {
+        display: grid;
+        gap: 12px;
+        background: var(--surface);
+      }
+
+      .detail-title-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .detail-title {
+        margin: 0;
+        font-size: 24px;
+        line-height: 1.35;
+      }
+
+      .detail-content {
+        margin: 0;
+        max-width: 880px;
+        color: #2f3c4a;
+        line-height: 1.7;
+        white-space: pre-wrap;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 36px;
+        padding: 8px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 4px;
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      .button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #ffffff;
+      }
+
+      .button.danger {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+
+      .button:hover {
+        filter: brightness(0.97);
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 20px;
+        padding: 20px;
+      }
+
+      .composer,
+      .log-item {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--surface);
+      }
+
+      .composer {
+        padding: 16px;
+      }
+
+      .form-grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .field input,
+      .field textarea {
+        width: 100%;
+        border: 1px solid var(--line-strong);
+        border-radius: 4px;
+        background: #ffffff;
+        color: var(--text);
+        padding: 9px 10px;
+      }
+
+      .field textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+
+      .inline-form {
+        display: inline-flex;
+      }
+
+      .search-form {
+        display: flex;
+        gap: 8px;
+      }
+
+      .search-form input {
+        min-width: 0;
+        flex: 1;
+        border: 1px solid var(--line-strong);
+        border-radius: 4px;
+        padding: 8px 10px;
+      }
+
+      .logs {
+        display: grid;
+        gap: 12px;
+      }
+
+      .log-item {
+        padding: 14px;
+      }
+
+      .log-body {
+        margin: 10px 0 12px;
+        color: #2f3c4a;
+        line-height: 1.7;
+        white-space: pre-wrap;
+      }
+
+      .reply-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+        padding-left: 16px;
+        border-left: 3px solid var(--line);
+      }
+
+      .reply {
+        padding: 10px;
+        background: var(--surface-alt);
+        border-radius: 4px;
+      }
+
+      .attachments {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .attachment {
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--surface-alt);
+        color: var(--accent-strong);
+        font-size: 12px;
+      }
+
+      details.editor {
+        margin-top: 12px;
+      }
+
+      details.editor summary {
+        color: var(--accent-strong);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .empty {
+        padding: 40px 20px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      @media (max-width: 900px) {
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .workspace,
+        .content-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .thread-list {
+          min-height: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/BBS">
+          <span class="brand-title">Algodoo Online</span>
+          <span class="brand-subtitle">BBS / WIKI / DATA / IMAGE</span>
+        </a>
+        <nav class="route-tabs" aria-label="sections">
+          {% for route in routes %}
+          <a
+            class="route-tab"
+            href="/{{ route.value }}"
+            {% if route == active_route %}aria-current="page"{% endif %}
+          >{{ route.value }}</a>
+          {% endfor %}
+        </nav>
+        <form class="session-form" method="post" action="/session">
+          <input name="user_name" value="{{ current_user }}" aria-label="user name" />
+          <button class="button" type="submit">Login</button>
+        </form>
+      </header>
+
+      <main class="workspace">
+        <aside class="thread-list">
+          <div class="list-header">
+            <h1 class="section-title">{{ active_route.value }} threads</h1>
+            <form class="search-form" method="get" action="/{{ active_route.value }}">
+              <input name="q" value="{{ search_query }}" placeholder="Search threads" />
+              <button class="button" type="submit">Search</button>
+            </form>
+          </div>
+          {% if threads %}
+          <ul class="thread-items">
+            {% for thread in threads %}
+            <li class="thread-item">
+              <a
+                class="thread-link"
+                href="/{{ active_route.value }}/{{ thread.thread_id }}"
+                {% if selected_thread and selected_thread.thread_id == thread.thread_id %}aria-current="page"{% endif %}
+              >
+                <span class="thread-title">{{ thread.title or "(no title)" }}</span>
+                <span class="meta">
+                  <span>{{ thread.user_name }}</span>
+                  <span>{{ thread.n_res }} res</span>
+                  <span>{{ thread.n_like }} like</span>
+                </span>
+              </a>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <div class="empty">まだスレッドがありません。</div>
+          {% endif %}
+        </aside>
+
+        <section class="detail">
+          {% if selected_thread %}
+          <div class="detail-header">
+            <div class="detail-title-row">
+              <div>
+                <h2 class="detail-title">{{ selected_thread.title or "(no title)" }}</h2>
+                <div class="meta">
+                  <span>{{ selected_thread.user_name }}</span>
+                  <span>{{ selected_thread.n_res }} responses</span>
+                  <span>{{ like_summary.n_good }} good</span>
+                  <span>{{ like_summary.n_bad }} bad</span>
+                </div>
+              </div>
+              <form method="post" action="/{{ active_route.value }}/{{ selected_thread.thread_id }}/like">
+                <button class="button primary" type="submit">Good</button>
+              </form>
+            </div>
+            <p class="detail-content">{{ selected_thread.content }}</p>
+            {% if selected_thread.file_keys %}
+            <div class="attachments" aria-label="attachments">
+              {% for file_key in selected_thread.file_keys %}
+              <a class="attachment" href="{{ file_key }}">{{ file_key }}</a>
+              {% endfor %}
+            </div>
+            {% endif %}
+            <details class="editor">
+              <summary>Edit thread</summary>
+              <form class="form-grid" method="post" action="/{{ active_route.value }}/{{ selected_thread.thread_id }}/edit">
+                <div class="field">
+                  <label for="edit-thread-title">title</label>
+                  <input id="edit-thread-title" name="title" value="{{ selected_thread.title }}" required />
+                </div>
+                <div class="field">
+                  <label for="edit-thread-content">content</label>
+                  <textarea id="edit-thread-content" name="content" required>{{ selected_thread.content }}</textarea>
+                </div>
+                <div class="field">
+                  <label for="edit-thread-files">attachment URLs / keys</label>
+                  <textarea id="edit-thread-files" name="file_keys">{% for file_key in selected_thread.file_keys %}{{ file_key }}
+{% endfor %}</textarea>
+                </div>
+                <div class="toolbar">
+                  <button class="button primary" type="submit">Save</button>
+                </div>
+              </form>
+              <form class="inline-form" method="post" action="/{{ active_route.value }}/{{ selected_thread.thread_id }}/delete">
+                <button class="button danger" type="submit">Delete thread</button>
+              </form>
+            </details>
+          </div>
+
+          <div class="content-grid">
+            <div class="logs">
+              {% for log in top_level_logs %}
+              <article class="log-item">
+                <div class="meta">
+                  <strong>{{ log.user_name }}</strong>
+                  <span>{{ log.n_res }} replies</span>
+                  <span>{{ log_like_summary[log.log_id].n_good }} good</span>
+                </div>
+                <p class="log-body">{{ log.content }}</p>
+                <div class="toolbar">
+                  <form method="post" action="/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/like">
+                    <button class="button" type="submit">Good</button>
+                  </form>
+                  <form method="post" action="/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/delete">
+                    <button class="button danger" type="submit">Delete</button>
+                  </form>
+                </div>
+                <details class="editor">
+                  <summary>Edit response</summary>
+                  <form class="form-grid" method="post" action="/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/edit">
+                    <div class="field">
+                      <label for="edit-log-{{ log.log_id }}">content</label>
+                      <textarea id="edit-log-{{ log.log_id }}" name="content" required>{{ log.content }}</textarea>
+                    </div>
+                    <button class="button primary" type="submit">Save</button>
+                  </form>
+                </details>
+
+                {% set replies = responses_by_log[log.log_id] %}
+                {% if replies %}
+                <div class="reply-list">
+                  {% for reply in replies %}
+                  <div class="reply">
+                    <div class="meta"><strong>{{ reply.user_name }}</strong></div>
+                    <div class="log-body">{{ reply.content }}</div>
+                  </div>
+                  {% endfor %}
+                </div>
+                {% endif %}
+
+                <form class="form-grid" method="post" action="/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/responses">
+                  <div class="field">
+                    <label for="reply-content-{{ log.log_id }}">reply</label>
+                    <textarea id="reply-content-{{ log.log_id }}" name="content" required></textarea>
+                  </div>
+                  <button class="button" type="submit">Reply</button>
+                </form>
+              </article>
+              {% endfor %}
+            </div>
+
+            <aside class="composer">
+              <form class="form-grid" method="post" action="/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs">
+                <h2 class="section-title">Post response</h2>
+                <div class="field">
+                  <label for="log-content">content</label>
+                  <textarea id="log-content" name="content" required></textarea>
+                </div>
+                <button class="button primary" type="submit">Post</button>
+              </form>
+
+              <hr />
+
+              <form class="form-grid" method="post" action="/{{ active_route.value }}/threads">
+                <h2 class="section-title">New thread</h2>
+                <div class="field">
+                  <label for="thread-title">title</label>
+                  <input id="thread-title" name="title" required />
+                </div>
+                <div class="field">
+                  <label for="thread-content">content</label>
+                  <textarea id="thread-content" name="content" required></textarea>
+                </div>
+                <div class="field">
+                  <label for="thread-files">attachment URLs / keys</label>
+                  <textarea id="thread-files" name="file_keys"></textarea>
+                </div>
+                <button class="button primary" type="submit">Create</button>
+              </form>
+            </aside>
+          </div>
+          {% else %}
+          <div class="content-grid">
+            <aside class="composer">
+              <form class="form-grid" method="post" action="/{{ active_route.value }}/threads">
+                <h2 class="section-title">New thread</h2>
+                <div class="field">
+                  <label for="thread-title">title</label>
+                  <input id="thread-title" name="title" required />
+                </div>
+                <div class="field">
+                  <label for="thread-content">content</label>
+                  <textarea id="thread-content" name="content" required></textarea>
+                </div>
+                <div class="field">
+                  <label for="thread-files-empty">attachment URLs / keys</label>
+                  <textarea id="thread-files-empty" name="file_keys"></textarea>
+                </div>
+                <button class="button primary" type="submit">Create</button>
+              </form>
+            </aside>
+          </div>
+          {% endif %}
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
