@@ -89,6 +89,7 @@ def main() -> None:
         ("/Data", "/i/DATA"),
     ]:
         assert final_url(path) == target
+    assert final_url("/unknown") == "/"
 
     for path, marker in [
         ("/auth/login", "ログインする"),
@@ -200,6 +201,14 @@ def main() -> None:
     )["thread"]
     api_thread_id = api_thread["thread_id"]
     assert api_thread["nRes"] == 0
+    assert api_thread["filedata"] == ["DATA/api.phn"]
+
+    content_only_update = api(
+        "PUT",
+        f"/threads/DATA/{api_thread_id}",
+        {"submition": {"title": f"API content edit {suffix}", "content": "content-only update"}},
+    )["thread_info"]
+    assert content_only_update["filedata"] == ["DATA/api.phn"]
 
     api_log = api(
         "POST",

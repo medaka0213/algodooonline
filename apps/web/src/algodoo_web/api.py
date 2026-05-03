@@ -70,6 +70,12 @@ def _filedata(data: dict[str, Any]) -> list[str]:
     return []
 
 
+def _optional_filedata(data: dict[str, Any]) -> list[str] | None:
+    if "filedata" not in data and "file_keys" not in data:
+        return None
+    return _filedata(data)
+
+
 def _route(route: str) -> LegacyRoute:
     try:
         return LegacyRoute(route.upper())
@@ -124,7 +130,7 @@ def api_update_thread(
         thread_id,
         str(data.get("title", "")).strip(),
         str(data.get("content", "")).strip(),
-        _filedata(data),
+        _optional_filedata(data),
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="thread not found")

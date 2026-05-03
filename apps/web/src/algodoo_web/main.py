@@ -272,7 +272,7 @@ def thread_page(request: Request, route: str, thread_id: str) -> HTMLResponse:
 @app.get("/{route}", response_class=HTMLResponse)
 def legacy_route_redirect(route: str) -> RedirectResponse:
     if route not in DISPLAY_ALIASES:
-        raise HTTPException(status_code=404, detail="route not found")
+        return RedirectResponse(url="/", status_code=303)
     return RedirectResponse(url=f"/i/{DISPLAY_ALIASES[route].value}", status_code=303)
 
 
