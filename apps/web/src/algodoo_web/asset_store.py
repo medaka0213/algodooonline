@@ -7,13 +7,13 @@ import zipfile
 from pathlib import Path
 
 import boto3
-from algodoo_domain.models import LegacyRoute
 from algodoo_data.uploads import (
     parse_data_url,
     validate_jpeg_bytes,
-    validate_phz_bytes,
     validate_phn_bytes,
+    validate_phz_bytes,
 )
+from algodoo_domain.models import LegacyRoute
 
 from algodoo_web.config import get_settings
 
@@ -53,7 +53,12 @@ def _persist_file_bytes(storage_key: str, body: bytes, content_type: str) -> str
         return None
     client = boto3.client("s3", region_name=settings.aws_region)
     key = _s3_object_key(storage_key)
-    extra: dict = {"Bucket": settings.asset_s3_bucket, "Key": key, "Body": body, "ContentType": content_type}
+    extra: dict = {
+        "Bucket": settings.asset_s3_bucket,
+        "Key": key,
+        "Body": body,
+        "ContentType": content_type,
+    }
     if settings.asset_s3_public_acl:
         extra["ACL"] = "public-read"
     try:
@@ -134,7 +139,11 @@ def normalize_and_persist_filedata(
                 out.append(key)
                 data_idx += 1
             else:
-                return [], "DATA uploads must be application/zip (PHZ) or text/plain (PHN) Data URLs"
+                msg = (
+                    "DATA uploads must be application/zip (PHZ) "
+                    "or text/plain (PHN) Data URLs"
+                )
+                return [], msg
         else:
             return [], "filedata is only supported for IMAGE and DATA routes"
 

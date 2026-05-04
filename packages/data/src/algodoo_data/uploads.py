@@ -62,7 +62,10 @@ def validate_thread_filedata(route: LegacyRoute, filedata: list[str]) -> str | N
                     if err := validate_phn_bytes(raw):
                         return err
                 else:
-                    return "DATA uploads must be application/zip (PHZ) or text/plain (PHN) Data URLs"
+                    return (
+                        "DATA uploads must be application/zip (PHZ) "
+                        "or text/plain (PHN) Data URLs"
+                    )
         return None
     return None
 

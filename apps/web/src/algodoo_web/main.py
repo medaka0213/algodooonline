@@ -26,6 +26,7 @@ from algodoo_data.repository import (
     update_log_details,
     update_thread_details,
 )
+from algodoo_data.uploads import validate_thread_filedata
 from algodoo_domain.models import LegacyRoute, LikeType
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -38,7 +39,6 @@ from algodoo_web.api import router as api_router
 from algodoo_web.asset_store import media_public_url, media_root, normalize_and_persist_filedata
 from algodoo_web.bootstrap import bootstrap_data
 from algodoo_web.session_refresh import LocalSessionRefreshMiddleware, parse_session_expiry
-from algodoo_data.uploads import validate_thread_filedata
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -641,10 +641,15 @@ async def create_thread_form(request: Request, route: str) -> RedirectResponse |
     content = form.get("content", "").strip()
     raw_files = _filedata_from_form(form.get("filedata", ""))
     if errs := _validate_thread_form_fields(title, content):
+        ctx = _board_context(
+            request,
+            legacy_route,
+            form_error=_server_side_error_message(errs),
+        )
         return templates.TemplateResponse(
             request=request,
             name="index.html",
-            context=_board_context(request, legacy_route, form_error=_server_side_error_message(errs)),
+            context=ctx,
             status_code=422,
         )
     if err := validate_thread_filedata(legacy_route, raw_files):
@@ -689,7 +694,11 @@ async def create_thread_form(request: Request, route: str) -> RedirectResponse |
 
 
 @app.post("/i/{route}/{thread_id}/edit", response_model=None)
-async def edit_thread_form(request: Request, route: str, thread_id: str) -> RedirectResponse | HTMLResponse:
+async def edit_thread_form(
+    request: Request,
+    route: str,
+    thread_id: str,
+) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
     legacy_route = _route_or_404(route)
     thread = get_thread(legacy_route, thread_id)
@@ -767,7 +776,11 @@ async def delete_thread_form(request: Request, route: str, thread_id: str) -> Re
 
 
 @app.post("/i/{route}/{thread_id}/logs", response_model=None)
-async def create_log_form(request: Request, route: str, thread_id: str) -> RedirectResponse | HTMLResponse:
+async def create_log_form(
+    request: Request,
+    route: str,
+    thread_id: str,
+) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
     legacy_route = _route_or_404(route)
     if get_thread(legacy_route, thread_id) is None:

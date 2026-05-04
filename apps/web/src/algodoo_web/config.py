@@ -15,8 +15,10 @@ class WebSettings:
     legacy_x_api_key: str = field(
         default_factory=lambda: (os.getenv("LEGACY_X_API_KEY") or "local-x-api-key").strip()
     )
-    # Optional S3 object storage for IMAGE/DATA keys (SPEC §575). Empty bucket → local media/ only.
-    asset_s3_bucket: str = field(default_factory=lambda: (os.getenv("ASSET_S3_BUCKET") or "").strip())
+    # Optional S3 for IMAGE/DATA (SPEC §575). Empty bucket → local media/ only.
+    asset_s3_bucket: str = field(
+        default_factory=lambda: (os.getenv("ASSET_S3_BUCKET") or "").strip(),
+    )
     asset_s3_prefix: str = field(
         default_factory=lambda: (os.getenv("ASSET_S3_PREFIX") or "").strip().strip("/")
     )

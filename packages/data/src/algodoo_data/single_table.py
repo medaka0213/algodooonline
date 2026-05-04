@@ -1,8 +1,7 @@
-from ulid import ULID
-
 from algodoo_domain.models import Like, Log, Thread, UserProfile
 from ddb_single import BaseModel, DBField, Table
 from ddb_single.table import FieldType
+from ulid import ULID
 
 from algodoo_data.config import get_data_settings
 

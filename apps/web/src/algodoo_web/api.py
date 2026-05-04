@@ -133,7 +133,11 @@ def api_create_thread(
         user_id=uid or sub,
         filedata=[],
     )
-    keys, nerr = normalize_and_persist_filedata(route=lr, thread_id=thread.thread_id, filedata=files)
+    keys, nerr = normalize_and_persist_filedata(
+        route=lr,
+        thread_id=thread.thread_id,
+        filedata=files,
+    )
     if nerr:
         delete_thread(lr, thread.thread_id)
         return _result_error({"filedata": nerr})
@@ -311,7 +315,10 @@ def api_get_own_like(request: Request, post_id: str) -> dict[str, dict]:
 
 
 @router.post("/like")
-def api_create_like(request: Request, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+def api_create_like(
+    request: Request,
+    body: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, bool]:
     uid = str(body.get("user_id", "anonymous"))
     require_matching_user_id(request, uid)
     create_like(
@@ -323,7 +330,10 @@ def api_create_like(request: Request, body: dict[str, Any] = Body(default_factor
 
 
 @router.delete("/like")
-def api_delete_like(request: Request, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+def api_delete_like(
+    request: Request,
+    body: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, bool]:
     uid = str(body.get("user_id", "anonymous"))
     require_matching_user_id(request, uid)
     delete_like(str(body.get("post_id", "")), uid)
@@ -331,7 +341,10 @@ def api_delete_like(request: Request, body: dict[str, Any] = Body(default_factor
 
 
 @router.post("/user")
-def api_create_user(request: Request, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+def api_create_user(
+    request: Request,
+    body: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, bool]:
     require_session(request)
     data = _submission(body)
     create_user(
