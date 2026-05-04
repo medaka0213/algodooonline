@@ -1,5 +1,6 @@
 import re
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -13,6 +14,8 @@ from algodoo_data.repository import (
     delete_log,
     delete_thread,
     get_like_summary,
+    get_own_like,
+    get_own_likes_batch,
     get_thread,
     get_user,
     list_logs,
@@ -172,7 +175,32 @@ def _markdown(value: str) -> Markup:
 def _relative(value: str) -> str:
     if not value:
         return ""
-    return value.replace("T", " ").split(".")[0]
+    try:
+        normalized = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return value.replace("T", " ").split(".")[0]
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    seconds = max(
+        0,
+        int((datetime.now(UTC) - dt.astimezone(UTC)).total_seconds()),
+    )
+    if seconds < 45:
+        return "数秒前"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}分前"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}時間前"
+    days = hours // 24
+    if days < 30:
+        return f"{days}日前"
+    months = days // 30
+    if months < 12:
+        return f"{months}ヶ月前"
+    return f"{days // 365}年前"
 
 
 def _is_image(value: str) -> bool:
@@ -186,22 +214,52 @@ def _is_thumb(value: str) -> bool:
     return "_thumb." in value.lower() or value.lower().endswith("thumb.png")
 
 
+def _first_image(values: list[str] | None) -> str:
+    for value in values or []:
+        if _is_image(value):
+            return value
+    return ""
+
+
+def _first_data_thumb(values: list[str] | None) -> str:
+    for value in values or []:
+        if _is_thumb(value):
+            return value
+    first = next(iter(values or []), "")
+    if first.lower().endswith(".phz"):
+        return f"{first[:-4]}_thumb.png"
+    return ""
+
+
 templates.env.filters["highlight"] = _highlight
 templates.env.filters["snippet"] = _snippet
 templates.env.filters["markdown"] = _markdown
 templates.env.filters["relative"] = _relative
 templates.env.filters["is_image"] = _is_image
 templates.env.filters["is_thumb"] = _is_thumb
+templates.env.filters["first_image"] = _first_image
+templates.env.filters["first_data_thumb"] = _first_data_thumb
 
 
 def _base_context(request: Request) -> dict[str, object]:
+    query_string = request.url.query
     return {
         "request": request,
         "routes": list(LegacyRoute),
         "route_labels": ROUTE_LABELS,
         "sort_options": SORT_OPTIONS,
         "current_user": _current_user(request),
+        "current_path_with_query": (
+            f"{request.url.path}?{query_string}" if query_string else request.url.path
+        ),
     }
+
+
+def _build_own_likes(items: list, current_user: dict | None) -> dict[str, dict]:
+    if not current_user:
+        return {}
+    post_ids = [item.thread_id if hasattr(item, "thread_id") else item.log_id for item in items]
+    return get_own_likes_batch(post_ids, current_user["sub"])
 
 
 def _board_context(
@@ -223,8 +281,9 @@ def _board_context(
     top_level_logs = [log for log in logs if not log.response_to]
     responses_by_log = {
         log.log_id: [reply for reply in logs if reply.response_to == log.log_id]
-        for log in top_level_logs
+        for log in logs
     }
+    current_user = _current_user(request)
     return {
         **_base_context(request),
         "page": "board",
@@ -237,6 +296,17 @@ def _board_context(
         "responses_by_log": responses_by_log,
         "like_summary": get_like_summary(selected_thread.thread_id) if selected_thread else {},
         "log_like_summary": {log.log_id: get_like_summary(log.log_id) for log in logs},
+        "thread_own_likes": (
+            _build_own_likes(threads, current_user)
+        ),
+        "selected_thread_own_like": (
+            get_own_like(selected_thread.thread_id, current_user["sub"])
+            if selected_thread and current_user
+            else {}
+        ),
+        "log_own_likes": (
+            _build_own_likes(logs, current_user)
+        ),
     }
 
 
@@ -555,7 +625,10 @@ async def like_thread_form(request: Request, route: str, thread_id: str) -> Redi
         delete_like(thread_id, user["sub"])
     else:
         create_like(thread_id, user["sub"], LikeType(form.get("type", "good")))
-    return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
+    next_url = form.get("next", "")
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        next_url = f"/i/{legacy_route.value}/{thread_id}"
+    return RedirectResponse(url=next_url, status_code=303)
 
 
 @app.post("/i/{route}/{thread_id}/logs/{log_id}/like")
@@ -572,7 +645,10 @@ async def like_log_form(
         delete_like(log_id, user["sub"])
     else:
         create_like(log_id, user["sub"], LikeType(form.get("type", "good")))
-    return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
+    next_url = form.get("next", "")
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        next_url = f"/i/{legacy_route.value}/{thread_id}"
+    return RedirectResponse(url=next_url, status_code=303)
 
 
 @app.get("/{path:path}", response_class=HTMLResponse)

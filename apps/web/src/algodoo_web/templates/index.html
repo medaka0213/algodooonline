@@ -23,12 +23,10 @@
         align-items: center;
         justify-content: space-between;
         gap: 1rem;
-        min-height: 56px;
         padding: .5rem 1rem;
         background: #f8f9fa;
-        border-bottom: 1px solid #dee2e6;
       }
-      .navbar-left, .navbar-right, .nav-links { display: flex; align-items: center; gap: .75rem; }
+      .navbar-left, .navbar-right, .nav-links { display: flex; align-items: center; gap: 1rem; }
       .navbar-brand { color: rgba(0, 0, 0, .9); font-size: 1.25rem; white-space: nowrap; }
       .dropdown { position: relative; }
       .dropdown summary {
@@ -56,17 +54,30 @@
         width: 100%;
         padding: .25rem 1.5rem;
         color: #212529;
+        background: transparent;
+        border: 0;
+        text-align: left;
         white-space: nowrap;
+        cursor: pointer;
+      }
+      .dropdown-item:hover { background: #f8f9fa; text-decoration: none; }
+      .dropdown-divider {
+        height: 0;
+        margin: .5rem 0;
+        overflow: hidden;
+        border-top: 1px solid #e9ecef;
       }
       .container {
         width: 100%;
-        max-width: 1140px;
-        min-height: calc(100vh - 56px);
         margin: 0 auto;
         padding: 1rem;
         border-left: 1px solid #dee2e6;
         border-right: 1px solid #dee2e6;
       }
+      @media (min-width: 576px) { .container { max-width: 540px; } }
+      @media (min-width: 768px) { .container { max-width: 720px; } }
+      @media (min-width: 992px) { .container { max-width: 960px; } }
+      @media (min-width: 1200px) { .container { max-width: 1140px; } }
       .p-3 { padding: 1rem; }
       .border-right { border-right: 1px solid #dee2e6; }
       .border-left { border-left: 1px solid #dee2e6; }
@@ -141,40 +152,125 @@
       .btn-danger { color: #fff; background: #dc3545; border-color: #dc3545; }
       .btn-outline-secondary { color: #6c757d; background: #fff; border-color: #6c757d; }
       .btn-sm { min-height: 30px; padding: .25rem .5rem; font-size: .875rem; }
+      .text-danger { color: #dc3545; }
       .form-error { color: #dc3545; white-space: pre-wrap; }
       .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .75rem 0; }
       .search-form {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
-        gap: .5rem;
-        margin: 1rem 0;
+        gap: 0;
+        row-gap: 1rem;
+        margin: 1.5rem 0;
       }
-      .sort-select { width: 50%; min-width: 240px; margin-top: .5rem; }
+      .search-form input {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+      }
+      .search-form button {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+      }
+      .sort-select {
+        grid-column: 1 / 2;
+        width: 50%;
+        min-width: 240px;
+      }
       .thread-item {
         display: grid;
-        grid-template-columns: auto auto minmax(0, 1fr);
-        gap: .75rem;
-        padding: 1rem 0;
+        grid-template-columns: 8.333333% minmax(0, 1fr);
+        gap: 0;
+        margin: 1.5rem 0;
         color: #212529;
         border-top: 1px solid #dee2e6;
+        border-bottom: 1px solid #dee2e6;
       }
-      .thread-item:hover { background: #f8f9fa; text-decoration: none; }
+      .thread-item.has-preview {
+        grid-template-columns: 16.666667% 8.333333% minmax(0, 1fr);
+      }
       .thread-preview {
-        width: 96px;
-        height: 72px;
+        display: block;
+        width: 100%;
+        height: 100%;
+        max-height: 200px;
         object-fit: cover;
-        border: 1px solid #dee2e6;
       }
-      .like-box { min-width: 3rem; text-align: center; color: #6c757d; }
-      .like-score { display: block; color: #212529; font-weight: 700; }
-      .thread-title { margin: 0 0 .35rem; font-size: 1.75rem; font-weight: 700; }
-      .meta { display: flex; flex-wrap: wrap; gap: .75rem; color: #6c757d; font-size: .875rem; }
+      .thread-link {
+        position: relative;
+        display: block;
+        width: 100%;
+        color: #212529;
+      }
+      .thread-link:hover {
+        opacity: .5;
+        text-decoration: none;
+      }
+      .thread-item-body { padding: 1rem 0 1rem .25rem; }
+      .like-box {
+        min-width: 2.4rem;
+        margin: 1rem .5rem;
+        text-align: center;
+        color: #aaa;
+      }
+      .like-button {
+        display: block;
+        width: 20px;
+        height: 20px;
+        margin: 0 auto .25rem;
+        padding: 0;
+        color: #aaa;
+        background: transparent;
+        border: 0;
+        line-height: 0;
+        cursor: pointer;
+      }
+      .like-button.is-liked {
+        color: #00ff88;
+      }
+      .like-icon {
+        display: block;
+        width: 20px;
+        height: 20px;
+        margin: 0;
+        fill: currentColor;
+      }
+      .like-score {
+        display: block;
+        color: #6c757d;
+        font-size: 80%;
+        font-weight: 400;
+        line-height: 1.5;
+      }
+      .thread-title { margin: 0 0 .5rem; font-size: 1.75rem; font-weight: 700; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: .5rem;
+        color: rgba(0, 0, 0, .5);
+      }
+      .meta strong { color: #212529; }
       .excerpt { margin: .5rem 0 0; color: #495057; overflow-wrap: anywhere; }
-      .thread-block {
+      .post-row {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr);
         gap: 1rem;
+        margin: 1rem 0 1.5rem;
+      }
+      .post-detail {
+        margin-bottom: 1.5rem;
+      }
+      .post-detail h1 {
         margin: 1rem 0;
+        font-size: 2.5rem;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .post-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: .75rem;
+        margin-bottom: 1rem;
       }
       .content-plain {
         white-space: pre-wrap;
@@ -205,30 +301,108 @@
         padding: 1rem 0;
         border-top: 1px solid #dee2e6;
       }
-      .log-body { margin: .75rem 0; overflow-wrap: anywhere; }
+      .log-body {
+        margin: .75rem 0;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
       .deleted { color: #adb5bd; }
       .reply-list {
-        margin: .75rem 0 0 1rem;
+        margin: .75rem 0 0 0;
         padding-left: 1rem;
         border-left: 3px solid #dee2e6;
       }
-      .modal-toggle summary {
-        display: inline-block;
+      .modal-toggle {
+        margin: 0 0 1.5rem;
+      }
+      .modal-toggle > summary {
+        display: block;
+        width: 100%;
         min-height: 38px;
         padding: .375rem .75rem;
-        color: #fff;
-        background: #007bff;
+        color: #007bff;
+        background: #fff;
         border: 1px solid #007bff;
         border-radius: .25rem;
         cursor: pointer;
+        list-style: none;
+        text-align: center;
       }
-      .modal-toggle.secondary summary { color: #212529; background: #fff; border-color: #ced4da; }
-      .modal-body {
-        margin: .75rem 0 1rem;
-        padding: 1rem;
-        border: 1px solid #dee2e6;
-        border-radius: .25rem;
+      .modal-toggle > summary::-webkit-details-marker { display: none; }
+      .modal-toggle > summary:hover { color: #fff; background: #007bff; text-decoration: none; }
+      .modal-toggle.secondary > summary {
+        display: inline-block;
+        width: auto;
+        min-height: 30px;
+        padding: .25rem .5rem;
+        color: #212529;
         background: #fff;
+        border-color: #ced4da;
+        font-size: .875rem;
+      }
+      .modal-toggle.secondary > summary:hover { color: #212529; background: #f8f9fa; }
+      .modal-shell[hidden] { display: none; }
+      .modal-shell::before,
+      .modal-toggle[open]::before,
+      .log-reply-toggle[open]::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        background: rgba(0, 0, 0, .5);
+      }
+      .log-reply-toggle > summary {
+        list-style: none;
+        cursor: pointer;
+      }
+      .log-reply-toggle > summary:hover { opacity: .5; }
+      .log-reply-toggle > summary::-webkit-details-marker { display: none; }
+      .reply-disclosure > summary {
+        list-style: none;
+        color: #007bff;
+        cursor: pointer;
+      }
+      .reply-disclosure > summary::-webkit-details-marker { display: none; }
+      .modal-body {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 1001;
+        width: calc(100% - 2rem);
+        max-width: 800px;
+        max-height: calc(100vh - 3.5rem);
+        margin: 0;
+        padding: 1rem;
+        overflow-y: auto;
+        border: 1px solid rgba(0, 0, 0, .2);
+        border-radius: .3rem;
+        background: #fff;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 .5rem 1rem rgba(0, 0, 0, .25);
+      }
+      .modal-body h2 {
+        margin: -1rem -1rem 1rem;
+        padding: 1rem;
+        border-bottom: 1px solid #dee2e6;
+        font-size: 1.25rem;
+        font-weight: 500;
+      }
+      .modal-log-preview {
+        margin-bottom: 1rem;
+        padding: 1rem;
+        border-top: 1px solid #dee2e6;
+        border-bottom: 1px solid #dee2e6;
+      }
+      .modal-close {
+        float: right;
+        padding: 0;
+        color: #000;
+        background: transparent;
+        border: 0;
+        font-size: 1.5rem;
+        line-height: 1;
+        opacity: .5;
+        cursor: pointer;
       }
       .drop-zone {
         padding: 1rem;
@@ -241,13 +415,110 @@
       @media (max-width: 720px) {
         .navbar { align-items: flex-start; flex-direction: column; }
         .navbar-left, .navbar-right { flex-wrap: wrap; }
-        .thread-item { grid-template-columns: auto minmax(0, 1fr); }
-        .thread-preview { grid-row: span 2; }
+        .thread-item { grid-template-columns: 16.666667% minmax(0, 1fr); }
+        .thread-item.has-preview { grid-template-columns: 16.666667% minmax(0, 1fr); }
+        .thread-preview {
+          grid-column: 1 / -1;
+          width: 100%;
+          height: auto;
+        }
         .sort-select { width: 100%; }
       }
     </style>
   </head>
   <body>
+    {% macro render_log_item(log, active_route, selected_thread, current_user, search_query, responses_by_log, log_like_summary, log_own_likes) %}
+      {% set own_log_like = (log_own_likes|default({})).get(log.log_id, {}) %}
+      <article class="log-item">
+        <div class="post-row">
+          <div class="like-box">
+            {% if not log.is_deleted %}
+            <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/like">
+              <input type="hidden" name="next" value="{{ current_path_with_query }}" />
+              {% if own_log_like.type == "good" %}
+              <input type="hidden" name="action" value="delete" />
+              {% else %}
+              <input type="hidden" name="type" value="good" />
+              {% endif %}
+              <button class="like-button{% if own_log_like.type == "good" %} is-liked{% endif %}" type="submit" aria-label="like"><svg class="like-icon" viewBox="0 0 1024 1024" aria-hidden="true"><path d="M1024 512 512 0 0 512h288v512h448V512z"></path></svg></button>
+            </form>
+            <span class="like-score">{{ log_like_summary[log.log_id].n_total }}</span>
+            {% endif %}
+          </div>
+          <div>
+            <div class="post-head">
+              <div class="meta"><strong>{{ log.user_name }}</strong><span>{{ log.updated_at|relative }}</span>{% if log.is_edited %}<span>編集済み</span>{% endif %}</div>
+              {% if current_user and current_user.sub == log.user_id and not log.is_deleted %}
+              <details class="dropdown">
+                <summary class="btn btn-sm btn-outline-secondary">menu</summary>
+                <div class="dropdown-menu right">
+                  <button class="dropdown-item" type="button" data-open-modal="edit-{{ log.log_id }}">ログを編集</button>
+                  <button class="dropdown-item text-danger" type="button" data-open-modal="delete-{{ log.log_id }}">ログを削除</button>
+                </div>
+              </details>
+              {% endif %}
+            </div>
+            {% if log.is_deleted %}
+            <p class="deleted">この返信は削除されました</p>
+            {% else %}
+            <details class="log-reply-toggle">
+              <summary><div class="log-body">{{ log.content|highlight(search_query) }}</div></summary>
+              <div class="modal-body">
+                <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>このログに返信する</h2>
+                <div class="modal-log-preview">
+                  <div class="meta"><strong>{{ log.user_name }}</strong><span>{{ log.updated_at|relative }}</span>{% if log.is_edited %}<span>編集済み</span>{% endif %}</div>
+                  <div class="log-body">{{ log.content|highlight(search_query) }}</div>
+                </div>
+                {% if current_user %}
+                <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/responses">
+                  <div class="form-group"><label>content<textarea class="form-control" name="content" required maxlength="32000"></textarea></label></div>
+                  <button class="btn btn-primary" type="submit">Submit</button>
+                </form>
+                {% else %}
+                <a href="/auth/login">ログインしてください</a>
+                {% endif %}
+              </div>
+            </details>
+            {% endif %}
+
+            {% if current_user and current_user.sub == log.user_id and not log.is_deleted %}
+            <div id="edit-{{ log.log_id }}" class="modal-shell" hidden>
+              <div class="modal-body">
+                <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>ログを編集する</h2>
+                <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/edit">
+                  <div class="form-group"><label>content<textarea class="form-control" name="content" required maxlength="32000">{{ log.content }}</textarea></label></div>
+                  <button class="btn btn-primary" type="submit">Submit</button>
+                </form>
+              </div>
+            </div>
+            <div id="delete-{{ log.log_id }}" class="modal-shell" hidden>
+              <div class="modal-body">
+                <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>ログを削除する</h2>
+                <p class="text-danger">投稿を削除するには、「削除」または「delete」と入力してください</p>
+                <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/delete">
+                  <input class="form-control" name="deletepass" required />
+                  <button class="btn btn-primary" type="submit">Submit</button>
+                </form>
+              </div>
+            </div>
+            {% endif %}
+
+            {% set replies = (responses_by_log|default({})).get(log.log_id, []) %}
+            {% if replies %}
+            <details class="reply-disclosure">
+              <summary>{{ replies|length }}件の返信</summary>
+              <div class="reply-list">
+                {% for reply in replies %}
+                {{ render_log_item(reply, active_route, selected_thread, current_user, search_query, responses_by_log, log_like_summary, log_own_likes) }}
+                {% endfor %}
+              </div>
+            </details>
+            {% endif %}
+          </div>
+        </div>
+      </article>
+    {% endmacro %}
+
     <nav class="navbar">
       <div class="navbar-left">
         <a class="navbar-brand" href="/">AlgodooOnline [ver 2.0]</a>
@@ -255,6 +526,7 @@
           <summary>サイトマップ ▾</summary>
           <div class="dropdown-menu">
             <a class="dropdown-item" href="/">ホーム</a>
+            <div class="dropdown-divider"></div>
             <a class="dropdown-item" href="/i/BBS">掲示板</a>
             <a class="dropdown-item" href="/i/WIKI">Wiki</a>
             <a class="dropdown-item" href="/i/IMAGE">画像</a>
@@ -391,9 +663,10 @@
         <summary>スレッドを投稿する</summary>
         <div class="modal-body">
           {% if current_user %}
-          <h2>スレッドを投稿する</h2>
+          <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>スレッドを投稿する</h2>
           {% include "thread_form.html" %}
           {% else %}
+          <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>スレッドを投稿する</h2>
           <a href="/auth/login">ログインしてください</a>
           {% endif %}
         </div>
@@ -406,71 +679,87 @@
         </select>
       </form>
       {% for thread in threads %}
-      <a class="thread-item" href="/i/{{ active_route.value }}/{{ thread.thread_id }}">
-        {% if active_route.value == "IMAGE" and thread.filedata %}
-          {% for file in thread.filedata %}{% if file|is_image %}<img class="thread-preview" src="{{ file }}" alt="" />{% endif %}{% endfor %}
-        {% elif active_route.value == "DATA" and thread.filedata %}
-          {% for file in thread.filedata %}{% if file|is_thumb %}<img class="thread-preview" src="{{ file }}" alt="" />{% endif %}{% endfor %}
-        {% endif %}
-        <span class="like-box">▲<span class="like-score">{{ thread.n_like }}</span></span>
-        <span>
+      {% if active_route.value == "IMAGE" %}
+      {% set preview_src = thread.filedata|first_image %}
+      {% elif active_route.value == "DATA" %}
+      {% set preview_src = thread.filedata|first_data_thumb %}
+      {% else %}
+      {% set preview_src = "" %}
+      {% endif %}
+      {% set has_preview = preview_src %}
+      {% set own_thread_like = (thread_own_likes|default({})).get(thread.thread_id, {}) %}
+      <div class="thread-item{% if has_preview %} has-preview{% endif %}">
+        {% if preview_src %}<img class="thread-preview" src="{{ preview_src }}" alt="" />{% endif %}
+        <div class="like-box">
+          <form method="post" action="/i/{{ active_route.value }}/{{ thread.thread_id }}/like">
+            <input type="hidden" name="next" value="{{ current_path_with_query }}" />
+            {% if own_thread_like.type == "good" %}
+            <input type="hidden" name="action" value="delete" />
+            {% else %}
+            <input type="hidden" name="type" value="good" />
+            {% endif %}
+            <button class="like-button{% if own_thread_like.type == "good" %} is-liked{% endif %}" type="submit" aria-label="like"><svg class="like-icon" viewBox="0 0 1024 1024" aria-hidden="true"><path d="M1024 512 512 0 0 512h288v512h448V512z"></path></svg></button>
+          </form>
+          <span class="like-score">{{ thread.n_like }}</span>
+        </div>
+        <a class="thread-link thread-item-body" href="/i/{{ active_route.value }}/{{ thread.thread_id }}">
           <h3 class="thread-title">{{ thread.title|highlight(search_query) }}</h3>
           <span class="meta">
-            <span>{{ thread.user_name }}</span>
+            <strong>{{ thread.user_name }}</strong>
             <span>返信: {{ thread.n_res }}件</span>
             <span>{{ thread.updated_at|relative }}</span>
             {% if thread.is_edited %}<span>編集済み</span>{% endif %}
           </span>
           <p class="excerpt">{{ thread.content|snippet(search_query, 140)|highlight(search_query) }}</p>
-        </span>
-      </a>
+        </a>
+      </div>
       {% else %}
       <p>まだスレッドがありません。</p>
       {% endfor %}
       {% endif %}
 
       {% if selected_thread %}
-      <article>
-        <div class="thread-block">
+      {% set own_selected_thread_like = selected_thread_own_like|default({}) %}
+      <article class="post-detail">
+        {% if active_route.value == "DATA" and selected_thread.filedata %}
+        <div class="download-block">
+          {% for file in selected_thread.filedata %}
+            {% if file|is_thumb %}<img class="data-thumb" src="{{ file }}" alt="thumbnail" />{% else %}<a href="{{ file }}">ダウンロード</a>{% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+        <h1>{{ selected_thread.title }}</h1>
+        <div class="post-row">
           <div class="like-box">
             <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/like">
+              <input type="hidden" name="next" value="{{ current_path_with_query }}" />
+              {% if own_selected_thread_like.type == "good" %}
+              <input type="hidden" name="action" value="delete" />
+              {% else %}
               <input type="hidden" name="type" value="good" />
-              <button class="btn btn-sm" type="submit">▲</button>
+              {% endif %}
+              <button class="like-button{% if own_selected_thread_like.type == "good" %} is-liked{% endif %}" type="submit" aria-label="like"><svg class="like-icon" viewBox="0 0 1024 1024" aria-hidden="true"><path d="M1024 512 512 0 0 512h288v512h448V512z"></path></svg></button>
             </form>
             <span class="like-score">{{ like_summary.n_total }}</span>
-            <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/like">
-              <input type="hidden" name="type" value="bad" />
-              <button class="btn btn-sm" type="submit">▼</button>
-            </form>
-            <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/like">
-              <input type="hidden" name="action" value="delete" />
-              <button class="btn btn-sm" type="submit">解除</button>
-            </form>
           </div>
           <div>
-            {% if active_route.value == "DATA" and selected_thread.filedata %}
-            <div class="download-block">
-              {% for file in selected_thread.filedata %}
-                {% if file|is_thumb %}<img class="data-thumb" src="{{ file }}" alt="thumbnail" />{% else %}<a href="{{ file }}">ダウンロード</a>{% endif %}
-              {% endfor %}
-            </div>
-            {% endif %}
-            <h1>{{ selected_thread.title }}</h1>
-            <div class="meta">
-              <span>{{ selected_thread.user_name }}</span>
-              <span>返信: {{ selected_thread.n_res }}件</span>
-              <span>{{ selected_thread.updated_at|relative }}</span>
-              {% if selected_thread.is_edited %}<span>編集済み</span>{% endif %}
-            </div>
-            {% if current_user and current_user.sub == selected_thread.user_id %}
-            <details class="dropdown">
-              <summary>menu ▾</summary>
-              <div class="dropdown-menu">
-                <a class="dropdown-item" href="#edit-thread">投稿を編集</a>
-                <a class="dropdown-item" href="#delete-thread">投稿を削除</a>
+            <div class="post-head">
+              <div class="meta">
+                <strong>{{ selected_thread.user_name }}</strong>
+                <span>返信: {{ selected_thread.n_res }}件</span>
+                <span>{{ selected_thread.updated_at|relative }}</span>
+                {% if selected_thread.is_edited %}<span>編集済み</span>{% endif %}
               </div>
-            </details>
-            {% endif %}
+              {% if current_user and current_user.sub == selected_thread.user_id %}
+              <details class="dropdown">
+                <summary class="btn btn-sm btn-outline-secondary">menu</summary>
+                <div class="dropdown-menu right">
+                  <button class="dropdown-item" type="button" data-open-modal="edit-thread">投稿を編集</button>
+                  <button class="dropdown-item text-danger" type="button" data-open-modal="delete-thread">投稿を削除</button>
+                </div>
+              </details>
+              {% endif %}
+            </div>
             {% if active_route.value == "BBS" %}
             <div class="content-plain">{{ selected_thread.content }}</div>
             {% else %}
@@ -490,26 +779,24 @@
         </div>
 
         {% if current_user and current_user.sub == selected_thread.user_id %}
-        <details id="edit-thread" class="modal-toggle secondary">
-          <summary>投稿を編集</summary>
+        <div id="edit-thread" class="modal-shell" hidden>
           <div class="modal-body">
-            <h2>投稿を編集する</h2>
+            <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>投稿を編集する</h2>
             {% set form_action = "/i/" ~ active_route.value ~ "/" ~ selected_thread.thread_id ~ "/edit" %}
             {% set form_thread = selected_thread %}
             {% include "thread_form.html" %}
           </div>
-        </details>
-        <details id="delete-thread" class="modal-toggle secondary">
-          <summary>投稿を削除</summary>
+        </div>
+        <div id="delete-thread" class="modal-shell" hidden>
           <div class="modal-body">
-            <h2>投稿を削除する</h2>
-            <p>投稿を削除するには、「削除」または「delete」と入力してください</p>
+            <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>投稿を削除する</h2>
+            <p class="text-danger">投稿を削除するには、「削除」または「delete」と入力してください</p>
             <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/delete">
               <input class="form-control" name="deletepass" required />
-              <button class="btn btn-danger" type="submit">削除</button>
+              <button class="btn btn-primary" type="submit">Submit</button>
             </form>
           </div>
-        </details>
+        </div>
         {% endif %}
       </article>
 
@@ -517,12 +804,13 @@
         <summary>このスレッドに返信する</summary>
         <div class="modal-body">
           {% if current_user %}
-          <h2>このスレッドに返信する</h2>
+          <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>このスレッドに返信する</h2>
           <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs">
             <div class="form-group"><label>content<textarea class="form-control" name="content" required maxlength="32000"></textarea></label></div>
             <button class="btn btn-primary" type="submit">Submit</button>
           </form>
           {% else %}
+          <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>このスレッドに返信する</h2>
           <a href="/auth/login">ログインしてください</a>
           {% endif %}
         </div>
@@ -536,95 +824,40 @@
       </form>
 
       {% for log in top_level_logs %}
-      <article class="log-item">
-        <div class="thread-block">
-          <div class="like-box">
-            {% if not log.is_deleted %}
-            <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/like">
-              <input type="hidden" name="type" value="good" /><button class="btn btn-sm" type="submit">▲</button>
-            </form>
-            <span class="like-score">{{ log_like_summary[log.log_id].n_total }}</span>
-            <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/like">
-              <input type="hidden" name="type" value="bad" /><button class="btn btn-sm" type="submit">▼</button>
-            </form>
-            {% endif %}
-          </div>
-          <div>
-            <div class="meta"><strong>{{ log.user_name }}</strong><span>{{ log.created_at|relative }}</span>{% if log.is_edited %}<span>編集済み</span>{% endif %}</div>
-            {% if log.is_deleted %}
-            <p class="deleted">この返信は削除されました</p>
-            {% else %}
-            <div class="log-body">{{ log.content|highlight(search_query) }}</div>
-            {% if current_user and current_user.sub == log.user_id %}
-            <details class="dropdown">
-              <summary>menu ▾</summary>
-              <div class="dropdown-menu">
-                <a class="dropdown-item" href="#edit-{{ log.log_id }}">ログを編集</a>
-                <a class="dropdown-item" href="#delete-{{ log.log_id }}">ログを削除</a>
-              </div>
-            </details>
-            {% endif %}
-            <details class="modal-toggle secondary">
-              <summary>このログに返信する</summary>
-              <div class="modal-body">
-                {% if current_user %}
-                <h2>このログに返信する</h2>
-                <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/responses">
-                  <div class="form-group"><label>content<textarea class="form-control" name="content" required maxlength="32000"></textarea></label></div>
-                  <button class="btn btn-primary" type="submit">Submit</button>
-                </form>
-                {% else %}<a href="/auth/login">ログインしてください</a>{% endif %}
-              </div>
-            </details>
-            {% endif %}
-
-            {% if current_user and current_user.sub == log.user_id and not log.is_deleted %}
-            <details id="edit-{{ log.log_id }}" class="modal-toggle secondary">
-              <summary>ログを編集</summary>
-              <div class="modal-body">
-                <h2>ログを編集する</h2>
-                <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/edit">
-                  <div class="form-group"><label>content<textarea class="form-control" name="content" required maxlength="32000">{{ log.content }}</textarea></label></div>
-                  <button class="btn btn-primary" type="submit">Submit</button>
-                </form>
-              </div>
-            </details>
-            <details id="delete-{{ log.log_id }}" class="modal-toggle secondary">
-              <summary>ログを削除</summary>
-              <div class="modal-body">
-                <h2>ログを削除する</h2>
-                <p>投稿を削除するには、「削除」または「delete」と入力してください</p>
-                <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/delete">
-                  <input class="form-control" name="deletepass" required />
-                  <button class="btn btn-danger" type="submit">削除</button>
-                </form>
-              </div>
-            </details>
-            {% endif %}
-
-            {% set replies = responses_by_log[log.log_id] %}
-            {% if replies %}
-            <details>
-              <summary>{{ replies|length }}件の返信</summary>
-              <div class="reply-list">
-                {% for reply in replies %}
-                <article class="log-item">
-                  <div class="meta"><strong>{{ reply.user_name }}</strong><span>{{ reply.created_at|relative }}</span></div>
-                  {% if reply.is_deleted %}<p class="deleted">この返信は削除されました</p>{% else %}<div class="log-body">{{ reply.content|highlight(search_query) }}</div>{% endif %}
-                </article>
-                {% endfor %}
-              </div>
-            </details>
-            {% endif %}
-          </div>
-        </div>
-      </article>
+      {{ render_log_item(log, active_route, selected_thread, current_user, search_query, responses_by_log, log_like_summary, log_own_likes) }}
       {% endfor %}
       {% endif %}
       {% endif %}
     </main>
 
     <script>
+      document.querySelectorAll("[data-open-modal]").forEach(function (button) {
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          var modal = document.getElementById(button.dataset.openModal);
+          if (modal) modal.hidden = false;
+          var dropdown = button.closest(".dropdown");
+          if (dropdown) dropdown.open = false;
+        });
+      });
+      document.querySelectorAll("[data-modal-close]").forEach(function (button) {
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          var modal = button.closest(".modal-shell") || button.closest("details");
+          if (modal && modal.classList.contains("modal-shell")) modal.hidden = true;
+          if (modal) modal.open = false;
+        });
+      });
+      document.querySelectorAll(".modal-shell, .modal-toggle, .log-reply-toggle").forEach(function (modal) {
+        modal.addEventListener("click", function (event) {
+          if (!modal.hidden && modal.classList.contains("modal-shell") && event.target === modal) {
+            modal.hidden = true;
+          }
+          if (modal.open && event.target === modal) modal.open = false;
+        });
+      });
       document.querySelectorAll("[data-file-input]").forEach(function (input) {
         input.addEventListener("change", function () {
           var target = document.querySelector(input.dataset.fileInput);
