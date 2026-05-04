@@ -10,3 +10,4 @@ __pycache__/
 
 vendor/ddb-single/
 .serena
+.mcp.json
