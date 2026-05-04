@@ -27,6 +27,7 @@ from algodoo_data.uploads import validate_thread_filedata
 from algodoo_domain.models import LegacyRoute, LikeType
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
+from algodoo_web.asset_store import normalize_and_persist_filedata
 from algodoo_web.legacy_api_guard import (
     require_configured_api_key,
     require_matching_user_id,
@@ -41,7 +42,8 @@ def _submission(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _result_error(errors: dict[str, str]) -> dict[str, object]:
-    return {"result": False, "errors": errors}
+    lines = ["Server-side Error"] + [f"{k}: {v}" for k, v in errors.items()]
+    return {"result": False, "errors": errors, "message": "\n".join(lines)}
 
 
 def _validate_thread(data: dict[str, Any], editing: bool = False) -> dict[str, object] | None:
@@ -129,8 +131,16 @@ def api_create_thread(
         content=str(data.get("content", "")).strip(),
         user_name=str(data.get("user_name", "")).strip(),
         user_id=uid or sub,
-        filedata=files,
+        filedata=[],
     )
+    keys, nerr = normalize_and_persist_filedata(route=lr, thread_id=thread.thread_id, filedata=files)
+    if nerr:
+        delete_thread(lr, thread.thread_id)
+        return _result_error({"filedata": nerr})
+    if keys or files:
+        updated = update_thread_details(lr, thread.thread_id, thread.title, thread.content, keys)
+        if updated is not None:
+            thread = updated
     return {"result": True, "thread": thread_payload(thread)}
 
 
@@ -159,6 +169,10 @@ def api_update_thread(
     if files is not None:
         if err := validate_thread_filedata(lr, files):
             return _result_error({"filedata": err})
+        keys, nerr = normalize_and_persist_filedata(route=lr, thread_id=thread_id, filedata=files)
+        if nerr:
+            return _result_error({"filedata": nerr})
+        files = keys
     thread = update_thread_details(
         lr,
         thread_id,
@@ -181,7 +195,7 @@ def api_delete_thread(request: Request, route: str, thread_id: str) -> dict[str,
 
 
 @router.get("/bbslogs/{thread_id}")
-def api_list_logs(thread_id: str) -> dict[str, list[dict]]:
+def api_list_logs(thread_id: str, _sub: str = Depends(require_session)) -> dict[str, list[dict]]:
     items = [log_payload(log) for log in list_logs(thread_id)]
     return {"submitions": items}
 
@@ -207,7 +221,9 @@ def api_create_log(
 
 
 @router.get("/bbslogs/{thread_id}/{log_id}")
-def api_get_log(thread_id: str, log_id: str) -> dict[str, dict]:
+def api_get_log(
+    thread_id: str, log_id: str, _sub: str = Depends(require_session)
+) -> dict[str, dict]:
     log = get_log(thread_id, log_id)
     if log is None:
         raise HTTPException(status_code=404, detail="log not found")
@@ -215,7 +231,9 @@ def api_get_log(thread_id: str, log_id: str) -> dict[str, dict]:
 
 
 @router.get("/bbslogs/{thread_id}/{log_id}/responses")
-def api_list_responses(thread_id: str, log_id: str) -> dict[str, list[dict]]:
+def api_list_responses(
+    thread_id: str, log_id: str, _sub: str = Depends(require_session)
+) -> dict[str, list[dict]]:
     items = [log_payload(log) for log in list_responses(thread_id, log_id)]
     return {"responses": items}
 

@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
@@ -8,6 +9,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 BASE_URL = "http://127.0.0.1:8000"
 OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
+GUEST_API_OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
 
 
 class ThreadLinkParser(HTMLParser):
@@ -65,15 +67,22 @@ def post(path: str, payload: dict[str, str]) -> str:
         return response.geturl().removeprefix(BASE_URL)
 
 
-def api(method: str, path: str, payload: dict | None = None) -> dict:
-    data = json.dumps(payload or {}).encode() if payload is not None else None
+def api(method: str, path: str, payload: dict | None = None, *, opener=None) -> dict:
+    api_key = (os.environ.get("LEGACY_X_API_KEY") or "local-x-api-key").strip()
+    if method.upper() == "GET":
+        data = None
+        headers = {"x-api-key": api_key}
+    else:
+        data = None if payload is None else json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json", "x-api-key": api_key}
     request = Request(
         BASE_URL + path,
         data=data,
         method=method,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
-    with OPENER.open(request, timeout=10) as response:
+    use_opener = opener or OPENER
+    with use_opener.open(request, timeout=10) as response:
         return json.loads(response.read().decode())
 
 
@@ -160,6 +169,16 @@ def main() -> None:
     assert "created by local smoke test" in thread_html
     assert "このスレッドに返信する" in thread_html
     assert_thread_list_layout("BBS", created_path, expect_preview=False)
+    try:
+        api(
+            "GET",
+            f"/bbslogs/{created_path.rsplit('/', 1)[-1]}",
+            opener=GUEST_API_OPENER,
+        )
+    except HTTPError as exc:
+        assert exc.code == 401
+    else:
+        raise AssertionError("legacy GET /bbslogs without session must return 401")
     assert post(f"{created_path}/like", {"type": "good", "next": "/i/BBS"}) == "/i/BBS"
 
     assert f'<span class="bg-warning">Smoke</span> {suffix}' in fetch("/i/BBS?q=Smoke&sort=BEST")
@@ -266,6 +285,7 @@ def main() -> None:
     data_html = fetch(data_path)
     assert "ダウンロード" in data_html
     assert "DATA/sample.phz" in data_html
+    assert "/media/DATA/sample.phz" in data_html
     assert_thread_list_layout("DATA", data_path, expect_preview=True)
 
     api_thread = api(

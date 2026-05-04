@@ -1,14 +1,14 @@
-"""Legacy JSON API gates: optional x-api-key (SPEC §11) and session for mutating routes."""
+"""Legacy JSON API gates: x-api-key (SPEC §11) and session for mutating routes."""
 
 from __future__ import annotations
 
-import os
-
 from fastapi import HTTPException, Request
+
+from algodoo_web.config import get_settings
 
 
 def require_configured_api_key(request: Request) -> None:
-    expected = os.getenv("LEGACY_X_API_KEY", "").strip()
+    expected = get_settings().legacy_x_api_key
     if not expected:
         return
     incoming = (request.headers.get("x-api-key") or request.headers.get("X-Api-Key") or "").strip()

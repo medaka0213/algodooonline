@@ -11,3 +11,6 @@ __pycache__/
 vendor/ddb-single/
 .serena
 .mcp.json
+
+# Runtime thread attachments (local or mirrored from S3); created by bootstrap / uploads
+apps/web/src/algodoo_web/media/

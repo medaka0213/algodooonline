@@ -8,7 +8,7 @@
   </div>
   <div class="form-group">
     <label>content
-      <textarea class="form-control" name="content" required maxlength="32000">{{ target_thread.content if target_thread else '' }}</textarea>
+      <textarea class="form-control{% if active_route.value != 'BBS' %} thread-md-editor{% endif %}" name="content" required maxlength="32000">{{ target_thread.content if target_thread else '' }}</textarea>
     </label>
   </div>
   {% if active_route.value in ["IMAGE", "DATA"] %}
@@ -17,7 +17,7 @@
       <p>ファイルをドラッグ＆ドロップ</p>
       <p>またはクリックして選択</p>
       {% if active_route.value == "IMAGE" %}
-      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple data-file-input="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-list="#file-list-{{ target_thread.thread_id if target_thread else 'new' }}" />
+      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple data-require-jpeg="1" data-file-input="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-list="#file-list-{{ target_thread.thread_id if target_thread else 'new' }}" />
       {% else %}
       <input type="file" accept=".phz,.phn,application/zip,text/plain" data-file-input="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-list="#file-list-{{ target_thread.thread_id if target_thread else 'new' }}" />
       {% endif %}
