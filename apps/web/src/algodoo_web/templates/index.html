@@ -462,12 +462,22 @@
             <p class="deleted">この返信は削除されました</p>
             {% else %}
             <details class="log-reply-toggle">
-              <summary><div class="log-body">{{ log.content|highlight(search_query) }}</div></summary>
+              <summary>
+                {% if active_route.value == "BBS" %}
+                <div class="log-body">{{ log.content|highlight(search_query) }}</div>
+                {% else %}
+                <div class="log-body markdown-body">{{ log.content|markdown }}</div>
+                {% endif %}
+              </summary>
               <div class="modal-body">
                 <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>このログに返信する</h2>
                 <div class="modal-log-preview">
                   <div class="meta"><strong>{{ log.user_name }}</strong><span>{{ log.updated_at|relative }}</span>{% if log.is_edited %}<span>編集済み</span>{% endif %}</div>
+                  {% if active_route.value == "BBS" %}
                   <div class="log-body">{{ log.content|highlight(search_query) }}</div>
+                  {% else %}
+                  <div class="log-body markdown-body">{{ log.content|markdown }}</div>
+                  {% endif %}
                 </div>
                 {% if current_user %}
                 <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/responses">

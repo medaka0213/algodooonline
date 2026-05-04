@@ -107,6 +107,8 @@ def user_from_item(item: dict) -> UserProfile:
         email_verified=bool(item.get("email_verified")),
         version=item.get("version") or "2",
         v1_password=item.get("v1_password"),
+        v1_id=item.get("v1_id"),
+        v1_name=item.get("v1_name"),
     )
 
 
@@ -136,7 +138,7 @@ def _sort_threads(threads: list[Thread], sort: str | None) -> list[Thread]:
 
 
 def _sort_logs(logs: list[Log], sort: str | None) -> list[Log]:
-    selected = sort if sort in SORT_KEYS else "NEWEST_CREATED"
+    selected = sort if sort in SORT_KEYS else "NEWEST_UPDATED"
     reverse = selected in {"NEWEST_UPDATED", "NEWEST_CREATED", "BEST", "MOST_RESPONSED"}
     if selected.endswith("UPDATED"):
         key = attrgetter("updated_at")
@@ -195,8 +197,15 @@ def list_logs(
         logs = [log for log in logs if not log.is_deleted]
     tokens = _tokens(query_text)
     if tokens:
+        by_id = {log.log_id: log for log in logs}
         matched = {log.log_id for log in logs if _matches(log.content, tokens)}
-        matched.update(log.response_to for log in logs if log.log_id in matched and log.response_to)
+        stack = list(matched)
+        while stack:
+            lid = stack.pop()
+            parent_id = by_id[lid].response_to if lid in by_id else None
+            if parent_id and parent_id in by_id and parent_id not in matched:
+                matched.add(parent_id)
+                stack.append(parent_id)
         logs = [log for log in logs if log.log_id in matched]
     return _sort_logs(logs, sort)
 
@@ -436,6 +445,8 @@ def create_user(
     sub: str | None = None,
     email_verified: bool = True,
     v1_password: str | None = None,
+    v1_id: str | None = None,
+    v1_name: str | None = None,
 ) -> UserProfile:
     user = UserProfile(
         username=username,
@@ -444,6 +455,8 @@ def create_user(
         email_verified=email_verified,
         version="2",
         v1_password=v1_password,
+        v1_id=v1_id,
+        v1_name=v1_name,
     )
     query().model(user_to_record(user)).update()
     return user
@@ -586,4 +599,6 @@ def user_payload(user: UserProfile) -> dict:
         "email": user.email,
         "email_verified": user.email_verified,
         "version": user.version,
+        "v1_id": user.v1_id,
+        "v1_name": user.v1_name,
     }

@@ -23,10 +23,17 @@ from algodoo_data.repository import (
     update_user_from_token,
     user_payload,
 )
+from algodoo_data.uploads import validate_thread_filedata
 from algodoo_domain.models import LegacyRoute, LikeType
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
-router = APIRouter()
+from algodoo_web.legacy_api_guard import (
+    require_configured_api_key,
+    require_matching_user_id,
+    require_session,
+)
+
+router = APIRouter(dependencies=[Depends(require_configured_api_key)])
 
 
 def _submission(body: dict[str, Any]) -> dict[str, Any]:
@@ -83,6 +90,18 @@ def _route(route: str) -> LegacyRoute:
         raise HTTPException(status_code=404, detail="route not found") from exc
 
 
+def _assert_thread_owner(route: LegacyRoute, thread_id: str, sub: str) -> None:
+    thread = get_thread(route, thread_id)
+    if thread is None or thread.user_id != sub:
+        raise HTTPException(status_code=403, detail="not allowed to modify this thread")
+
+
+def _assert_log_owner(thread_id: str, log_id: str, sub: str) -> None:
+    log = get_log(thread_id, log_id)
+    if log is None or log.user_id != sub:
+        raise HTTPException(status_code=403, detail="not allowed to modify this log")
+
+
 @router.get("/threads/{route}")
 def api_list_threads(route: str) -> dict[str, list[dict]]:
     items = [thread_payload(thread) for thread in list_threads(_route(route))]
@@ -92,18 +111,25 @@ def api_list_threads(route: str) -> dict[str, list[dict]]:
 @router.post("/threads/{route}")
 def api_create_thread(
     route: str,
+    request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, object]:
     data = _submission(body)
     if errors := _validate_thread(data):
         return errors
+    uid = str(data.get("user_id", "")).strip() or str(data.get("user_name", "")).strip()
+    sub = require_matching_user_id(request, uid or None)
+    lr = _route(route)
+    files = _filedata(data)
+    if err := validate_thread_filedata(lr, files):
+        return _result_error({"filedata": err})
     thread = create_thread(
-        route=_route(route),
+        route=lr,
         title=str(data.get("title", "")).strip(),
         content=str(data.get("content", "")).strip(),
         user_name=str(data.get("user_name", "")).strip(),
-        user_id=str(data.get("user_id", data.get("user_name", "anonymous"))),
-        filedata=_filedata(data),
+        user_id=uid or sub,
+        filedata=files,
     )
     return {"result": True, "thread": thread_payload(thread)}
 
@@ -118,19 +144,27 @@ def api_get_thread(route: str, thread_id: str) -> dict[str, dict]:
 
 @router.put("/threads/{route}/{thread_id}")
 def api_update_thread(
+    request: Request,
     route: str,
     thread_id: str,
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, object]:
+    sub = require_session(request)
+    lr = _route(route)
+    _assert_thread_owner(lr, thread_id, sub)
     data = _submission(body)
     if errors := _validate_thread(data, editing=True):
         return errors
+    files = _optional_filedata(data)
+    if files is not None:
+        if err := validate_thread_filedata(lr, files):
+            return _result_error({"filedata": err})
     thread = update_thread_details(
-        _route(route),
+        lr,
         thread_id,
         str(data.get("title", "")).strip(),
         str(data.get("content", "")).strip(),
-        _optional_filedata(data),
+        files,
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="thread not found")
@@ -138,8 +172,11 @@ def api_update_thread(
 
 
 @router.delete("/threads/{route}/{thread_id}")
-def api_delete_thread(route: str, thread_id: str) -> dict[str, bool]:
-    delete_thread(_route(route), thread_id)
+def api_delete_thread(request: Request, route: str, thread_id: str) -> dict[str, bool]:
+    sub = require_session(request)
+    lr = _route(route)
+    _assert_thread_owner(lr, thread_id, sub)
+    delete_thread(lr, thread_id)
     return {"result": True}
 
 
@@ -151,17 +188,20 @@ def api_list_logs(thread_id: str) -> dict[str, list[dict]]:
 
 @router.post("/bbslogs/{thread_id}")
 def api_create_log(
+    request: Request,
     thread_id: str,
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, object]:
     data = _submission(body)
     if errors := _validate_log(data):
         return errors
+    uid = str(data.get("user_id", data.get("user_name", "anonymous")))
+    require_matching_user_id(request, uid)
     log = create_log(
         thread_id=thread_id,
         content=str(data.get("content", "")).strip(),
         user_name=str(data.get("user_name", "anonymous")),
-        user_id=str(data.get("user_id", data.get("user_name", "anonymous"))),
+        user_id=uid,
     )
     return {"result": True, "log": log_payload(log)}
 
@@ -182,6 +222,7 @@ def api_list_responses(thread_id: str, log_id: str) -> dict[str, list[dict]]:
 
 @router.post("/bbslogs/{thread_id}/{log_id}")
 def api_create_response(
+    request: Request,
     thread_id: str,
     log_id: str,
     body: dict[str, Any] = Body(default_factory=dict),
@@ -189,11 +230,13 @@ def api_create_response(
     data = _submission(body)
     if errors := _validate_log(data):
         return errors
+    uid = str(data.get("user_id", data.get("user_name", "anonymous")))
+    require_matching_user_id(request, uid)
     log = create_log(
         thread_id=thread_id,
         content=str(data.get("content", "")).strip(),
         user_name=str(data.get("user_name", "anonymous")),
-        user_id=str(data.get("user_id", data.get("user_name", "anonymous"))),
+        user_id=uid,
         response_to=log_id,
     )
     return {"result": True, "log": log_payload(log)}
@@ -201,10 +244,13 @@ def api_create_response(
 
 @router.put("/bbslogs/{thread_id}/{log_id}")
 def api_update_log(
+    request: Request,
     thread_id: str,
     log_id: str,
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, object]:
+    sub = require_session(request)
+    _assert_log_owner(thread_id, log_id, sub)
     data = _submission(body)
     if errors := _validate_log(data):
         return errors
@@ -215,7 +261,9 @@ def api_update_log(
 
 
 @router.delete("/bbslogs/{thread_id}/{log_id}")
-def api_delete_log(thread_id: str, log_id: str) -> dict[str, bool]:
+def api_delete_log(request: Request, thread_id: str, log_id: str) -> dict[str, bool]:
+    sub = require_session(request)
+    _assert_log_owner(thread_id, log_id, sub)
     delete_log(thread_id, log_id)
     return {"result": True}
 
@@ -225,7 +273,10 @@ def api_own_likes_batch(
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, object]:
-    user_id = str(body.get("user_id") or request.cookies.get("algodoo_sub") or "anonymous")
+    sub = require_session(request)
+    user_id = str(body.get("user_id") or sub)
+    if user_id != sub:
+        raise HTTPException(status_code=403, detail="user_id does not match session")
     likes = [get_own_like(str(post_id), user_id) for post_id in body.get("post_ids", [])]
     return {"result": True, "likes": likes}
 
@@ -237,34 +288,41 @@ def api_get_likes(post_id: str) -> dict[str, dict[str, int]]:
 
 @router.get("/like/{post_id}/own")
 def api_get_own_like(request: Request, post_id: str) -> dict[str, dict]:
-    user_id = request.cookies.get("algodoo_sub") or "anonymous"
-    return {"like": get_own_like(post_id, user_id)}
+    sub = require_session(request)
+    return {"like": get_own_like(post_id, sub)}
 
 
 @router.post("/like")
-def api_create_like(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+def api_create_like(request: Request, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+    uid = str(body.get("user_id", "anonymous"))
+    require_matching_user_id(request, uid)
     create_like(
         str(body.get("post_id", "")),
-        str(body.get("user_id", "anonymous")),
+        uid,
         LikeType(str(body.get("type", "good"))),
     )
     return {"result": True}
 
 
 @router.delete("/like")
-def api_delete_like(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
-    delete_like(str(body.get("post_id", "")), str(body.get("user_id", "anonymous")))
+def api_delete_like(request: Request, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+    uid = str(body.get("user_id", "anonymous"))
+    require_matching_user_id(request, uid)
+    delete_like(str(body.get("post_id", "")), uid)
     return {"result": True}
 
 
 @router.post("/user")
-def api_create_user(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+def api_create_user(request: Request, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+    require_session(request)
     data = _submission(body)
     create_user(
         username=str(data.get("Username") or data.get("username") or ""),
         email=str(data.get("email") or ""),
         sub=str(data.get("sub") or data.get("Username") or ""),
         email_verified=bool(data.get("email_verified", True)),
+        v1_id=data.get("v1_id"),
+        v1_name=data.get("v1_name"),
     )
     return {"result": True}
 

@@ -1,4 +1,4 @@
-from uuid import uuid4
+from ulid import ULID
 
 from algodoo_domain.models import Like, Log, Thread, UserProfile
 from ddb_single import BaseModel, DBField, Table
@@ -31,11 +31,11 @@ def join_key(*parts: str) -> str:
 
 
 def create_thread_id(route: str) -> str:
-    return f"{route}_{uuid4().hex}"
+    return f"{route}_{str(ULID())}"
 
 
 def create_log_id(thread_id: str) -> str:
-    return f"{thread_id}_{uuid4().hex}"
+    return f"{thread_id}_{str(ULID())}"
 
 
 class ThreadRecord(BaseModel):
@@ -110,6 +110,8 @@ class UserRecord(BaseModel):
     email_verified = DBField(type=FieldType.BOOLEAN, default=False)
     version = DBField(search_key=True, nullable=False)
     v1_password = DBField()
+    v1_id = DBField()
+    v1_name = DBField()
 
 
 def thread_to_record(thread: Thread) -> ThreadRecord:
@@ -179,4 +181,6 @@ def user_to_record(user: UserProfile) -> UserRecord:
         email_verified=user.email_verified,
         version=user.version,
         v1_password=user.v1_password,
+        v1_id=user.v1_id,
+        v1_name=user.v1_name,
     )

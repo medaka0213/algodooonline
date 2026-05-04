@@ -695,3 +695,5 @@ Docker Compose 起動後に、ブラウザまたはHTTPテストだけで以下�
 上記残件は、画面見た目だけでなく旧サービスの操作結果、保存データ、API互換、添付ファイルの扱いに直結するため、個別に旧実装を参照して修正し、対応する `scripts/smoke_local.py` の確認項目を追加すること。
 
 補足として、旧互換の `GET /`（`message` にトークン相当の情報を載せる）は、ブラウザ向け HTML の `GET /` と衝突しないよう、`Accept` の先頭メディアタイプが `application/json` のときだけ JSON を返し、未認証なら 401 とする。スレッド詳細の返信一覧は、旧画面のログイン時のみ取得に合わせ、未ログインの画面では返信一覧を出さない。
+
+**実装進捗（2026-05-05）**: 旧互換 JSON API について `LEGACY_X_API_KEY` 設定時の `x-api-key` 検証、ミューテーション系でのセッション Cookie 必須と `user_id` の一致、`thread_id`/`log_id` の ULID 化、ログ一覧の既定ソートを `NEWEST_UPDATED` へ、ログ検索時の祖先ログ再帰含有、`WIKI`/`IMAGE`/`DATA` のログ本文 Markdown 化（簡易 sanitizer 付き）、`IMAGE` の JPEG Data URL 検証、`UserProfile` の `v1_id`/`v1_name` 保持を追加した。未着手または部分対応が残るのは Cognito 相当のトークン更新、S3 実保存と PHZ 完全検証、スライドショー/SimpleMDE 級 UI、サーバーレンダリングフォームの `.form-error` 複数行整形、旧エディタ相当の Markdown 互換の網羅などである。

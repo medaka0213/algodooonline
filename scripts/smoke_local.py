@@ -134,8 +134,10 @@ def main() -> None:
 
     assert "ログインしてください" in fetch("/i/BBS")
 
-    post("/auth/login", {"Username": f"smoke-{suffix}", "password": "password123"})
-    assert f"Hello, smoke-{suffix}!" in fetch("/")
+    smoke_user = f"smoke-{suffix}"
+    smoke_sub = f"local-{smoke_user}"
+    post("/auth/login", {"Username": smoke_user, "password": "password123"})
+    assert f"Hello, {smoke_user}!" in fetch("/")
     home_api = get_json("/")
     token_payload = json.loads(home_api["message"])
     assert token_payload["sub"]
@@ -271,8 +273,8 @@ def main() -> None:
         "/threads/DATA",
         {
             "submition": {
-                "user_name": "api-smoke",
-                "user_id": "api-smoke",
+                "user_name": smoke_user,
+                "user_id": smoke_sub,
                 "title": f"API {suffix}",
                 "content": "created through legacy JSON API",
                 "filedata": ["DATA/api.phn"],
@@ -295,8 +297,8 @@ def main() -> None:
         f"/bbslogs/{api_thread_id}",
         {
             "submition": {
-                "user_name": "api-smoke",
-                "user_id": "api-smoke",
+                "user_name": smoke_user,
+                "user_id": smoke_sub,
                 "content": "api log",
             }
         },
@@ -310,8 +312,8 @@ def main() -> None:
         f"/bbslogs/{api_thread_id}/{api_log['log_id']}",
         {
             "submition": {
-                "user_name": "api-smoke",
-                "user_id": "api-smoke",
+                "user_name": smoke_user,
+                "user_id": smoke_sub,
                 "content": "api child",
             }
         },
@@ -332,12 +334,12 @@ def main() -> None:
     assert api(
         "POST",
         "/like",
-        {"post_id": api_thread_id, "type": "bad", "user_id": "api-smoke"},
+        {"post_id": api_thread_id, "type": "bad", "user_id": smoke_sub},
     )["result"]
     assert api(
         "DELETE",
         "/like",
-        {"post_id": api_thread_id, "type": "bad", "user_id": "api-smoke"},
+        {"post_id": api_thread_id, "type": "bad", "user_id": smoke_sub},
     )["result"]
     assert api("DELETE", f"/bbslogs/{api_thread_id}/{api_log['log_id']}")["result"]
     assert api("DELETE", f"/threads/DATA/{api_thread_id}")["result"]

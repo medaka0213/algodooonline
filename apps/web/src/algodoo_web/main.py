@@ -163,21 +163,57 @@ def _snippet(value: str, query_text: str, length: int = 300) -> str:
     return f"{prefix}{value[start:end]}{suffix}"
 
 
+def _strip_unsafe_markup(html: str) -> str:
+    """SPEC §15: drop disallowed tags/attributes from already-escaped HTML fragments."""
+    out = re.sub(
+        r"</?(script|style|link|iframe|embed|object|html|head|meta|body|form|input|button)\b[^>]*>",
+        "",
+        html,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(r"\s+on\w+\s*=\s*(\"[^\"]*\"|'[^']*')", "", out, flags=re.IGNORECASE)
+    out = re.sub(r"\s(href|action|id)\s*=\s*(\"[^\"]*\"|'[^']*')", "", out, flags=re.IGNORECASE)
+    out = re.sub(r"\sdata-[\w-]+\s*=\s*(\"[^\"]*\"|'[^']*')", "", out, flags=re.IGNORECASE)
+    return out
+
+
 def _markdown(value: str) -> Markup:
     if value.lstrip().startswith(("<!", "<?", "<\\")):
         return Markup("")
     safe = escape(value)
+    safe = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", safe)
     safe = re.sub(r"^### (.+)$", r"<h3>\1</h3>", safe, flags=re.MULTILINE)
     safe = re.sub(r"^## (.+)$", r"<h2>\1</h2>", safe, flags=re.MULTILINE)
     safe = re.sub(r"^# (.+)$", r"<h1>\1</h1>", safe, flags=re.MULTILINE)
+    safe = re.sub(r"^\s*[-*]\s+(.+)$", r"<li>\1</li>", safe, flags=re.MULTILINE)
     safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
+    safe = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", safe)
     safe = re.sub(r"`([^`]+)`", r"<code>\1</code>", safe)
-    paragraphs = [
-        line if line.startswith("<h") else f"<p>{line}</p>"
-        for line in safe.splitlines()
-        if line.strip()
-    ]
-    return Markup("\n".join(paragraphs))
+    paragraphs: list[str] = []
+    in_list = False
+    for line in safe.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("<h"):
+            if in_list:
+                paragraphs.append("</ul>")
+                in_list = False
+            paragraphs.append(stripped)
+        elif stripped.startswith("<li>"):
+            if not in_list:
+                paragraphs.append("<ul>")
+                in_list = True
+            paragraphs.append(stripped)
+        else:
+            if in_list:
+                paragraphs.append("</ul>")
+                in_list = False
+            paragraphs.append(f"<p>{stripped}</p>")
+    if in_list:
+        paragraphs.append("</ul>")
+    joined = "\n".join(paragraphs)
+    return Markup(_strip_unsafe_markup(joined))
 
 
 def _relative(value: str) -> str:
@@ -290,7 +326,7 @@ def _board_context(
     top_level_logs = [log for log in logs if not log.response_to]
     responses_by_log = {
         log.log_id: [reply for reply in logs if reply.response_to == log.log_id]
-        for log in logs
+        for log in top_level_logs
     }
     current_user = _current_user(request)
     return {
