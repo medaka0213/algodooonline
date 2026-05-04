@@ -15,6 +15,7 @@ from algodoo_data.repository import (
     delete_thread,
     get_like_summary,
     get_own_like,
+    get_own_likes_batch,
     get_thread,
     get_user,
     list_logs,
@@ -227,7 +228,7 @@ def _first_data_thumb(values: list[str] | None) -> str:
     first = next(iter(values or []), "")
     if first.lower().endswith(".phz"):
         return f"{first[:-4]}_thumb.png"
-    return first
+    return ""
 
 
 templates.env.filters["highlight"] = _highlight
@@ -252,6 +253,13 @@ def _base_context(request: Request) -> dict[str, object]:
             f"{request.url.path}?{query_string}" if query_string else request.url.path
         ),
     }
+
+
+def _build_own_likes(items: list, current_user: dict | None) -> dict[str, dict]:
+    if not current_user:
+        return {}
+    post_ids = [item.thread_id if hasattr(item, "thread_id") else item.log_id for item in items]
+    return get_own_likes_batch(post_ids, current_user["sub"])
 
 
 def _board_context(
@@ -289,12 +297,7 @@ def _board_context(
         "like_summary": get_like_summary(selected_thread.thread_id) if selected_thread else {},
         "log_like_summary": {log.log_id: get_like_summary(log.log_id) for log in logs},
         "thread_own_likes": (
-            {
-                thread.thread_id: get_own_like(thread.thread_id, current_user["sub"])
-                for thread in threads
-            }
-            if current_user
-            else {}
+            _build_own_likes(threads, current_user)
         ),
         "selected_thread_own_like": (
             get_own_like(selected_thread.thread_id, current_user["sub"])
@@ -302,9 +305,7 @@ def _board_context(
             else {}
         ),
         "log_own_likes": (
-            {log.log_id: get_own_like(log.log_id, current_user["sub"]) for log in logs}
-            if current_user
-            else {}
+            _build_own_likes(logs, current_user)
         ),
     }
 
@@ -644,7 +645,10 @@ async def like_log_form(
         delete_like(log_id, user["sub"])
     else:
         create_like(log_id, user["sub"], LikeType(form.get("type", "good")))
-    return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
+    next_url = form.get("next", "")
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        next_url = f"/i/{legacy_route.value}/{thread_id}"
+    return RedirectResponse(url=next_url, status_code=303)
 
 
 @app.get("/{path:path}", response_class=HTMLResponse)

@@ -19,8 +19,8 @@ class ThreadLinkParser(HTMLParser):
             return
         attr_map = dict(attrs)
         href = attr_map.get("href")
-        class_name = attr_map.get("class", "")
-        if href and "thread-link" in class_name:
+        class_tokens = (attr_map.get("class") or "").split()
+        if href and "thread-link" in class_tokens:
             self.thread_href = href
 
 
@@ -79,6 +79,10 @@ def assert_thread_list_layout(route: str, thread_path: str, *, expect_preview: b
     assert "like-symbol" not in html
     if expect_preview:
         assert 'class="thread-preview"' in html
+        assert 'class="thread-item has-preview"' in html
+    else:
+        assert 'class="thread-preview"' not in html
+        assert 'class="thread-item has-preview"' not in html
 
 
 def main() -> None:

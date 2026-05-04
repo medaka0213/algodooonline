@@ -247,6 +247,24 @@ def get_own_like(post_id: str, user_id: str) -> dict:
     }
 
 
+def get_own_likes_batch(post_ids: list[str], user_id: str) -> dict[str, dict]:
+    if not post_ids or not user_id:
+        return {}
+    post_id_set = set(post_ids)
+    all_items = query().model(LikeRecord).search(LikeRecord.user_id.eq(user_id))
+    results: dict[str, dict] = {pid: {} for pid in post_ids}
+    for item in all_items:
+        pid = item.get("post_id")
+        if pid in post_id_set and not item.get("is_deleted"):
+            results[pid] = {
+                "post_id": pid,
+                "user_id": item["user_id"],
+                "type": item["like_type"],
+                "isDeleted": False,
+            }
+    return results
+
+
 def _persist_thread_counts(thread_id: str, touch_updated: bool = True) -> None:
     items = query().model(ThreadRecord).search(ThreadRecord.thread_id.eq(thread_id), limit=1)
     if not items:

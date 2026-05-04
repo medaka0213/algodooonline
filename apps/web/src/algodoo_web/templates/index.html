@@ -434,6 +434,7 @@
           <div class="like-box">
             {% if not log.is_deleted %}
             <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/like">
+              <input type="hidden" name="next" value="{{ current_path_with_query }}" />
               {% if own_log_like.type == "good" %}
               <input type="hidden" name="action" value="delete" />
               {% else %}
