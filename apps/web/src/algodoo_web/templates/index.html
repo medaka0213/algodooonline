@@ -731,6 +731,7 @@
         <h1>{{ selected_thread.title }}</h1>
         <div class="post-row">
           <div class="like-box">
+            {% if current_user %}
             <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/like">
               <input type="hidden" name="next" value="{{ current_path_with_query }}" />
               {% if own_selected_thread_like.type == "good" %}
@@ -741,6 +742,10 @@
               <button class="like-button{% if own_selected_thread_like.type == "good" %} is-liked{% endif %}" type="submit" aria-label="like"><svg class="like-icon" viewBox="0 0 1024 1024" aria-hidden="true"><path d="M1024 512 512 0 0 512h288v512h448V512z"></path></svg></button>
             </form>
             <span class="like-score">{{ like_summary.n_total }}</span>
+            {% else %}
+            <span class="like-readonly" aria-hidden="true">▲</span>
+            <span class="like-score">{{ like_summary.n_total }}</span>
+            {% endif %}
           </div>
           <div>
             <div class="post-head">
@@ -815,6 +820,7 @@
           {% endif %}
         </div>
       </details>
+      {% if current_user %}
       <form class="search-form" method="get" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}">
         <input class="form-control" name="q" value="{{ search_query }}" placeholder="返信を検索する" />
         <button class="btn btn-primary" type="submit">Submit</button>
@@ -826,6 +832,9 @@
       {% for log in top_level_logs %}
       {{ render_log_item(log, active_route, selected_thread, current_user, search_query, responses_by_log, log_like_summary, log_own_likes) }}
       {% endfor %}
+      {% else %}
+      <p class="login-hint"><a href="/auth/login">ログインしてください</a>（返信一覧はログイン後に表示されます。）</p>
+      {% endif %}
       {% endif %}
       {% endif %}
     </main>

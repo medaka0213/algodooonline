@@ -2,6 +2,7 @@ import json
 import time
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
@@ -27,6 +28,22 @@ class ThreadLinkParser(HTMLParser):
 def fetch(path: str) -> str:
     with OPENER.open(BASE_URL + path, timeout=10) as response:
         return response.read().decode()
+
+
+def fetch_guest(path: str) -> str:
+    guest = build_opener(HTTPCookieProcessor(CookieJar()))
+    with guest.open(BASE_URL + path, timeout=10) as response:
+        return response.read().decode()
+
+
+def get_json(path: str, opener=OPENER) -> dict:
+    request = Request(
+        BASE_URL + path,
+        method="GET",
+        headers={"Accept": "application/json"},
+    )
+    with opener.open(request, timeout=10) as response:
+        return json.loads(response.read().decode())
 
 
 def final_url(path: str) -> str:
@@ -119,6 +136,15 @@ def main() -> None:
 
     post("/auth/login", {"Username": f"smoke-{suffix}", "password": "password123"})
     assert f"Hello, smoke-{suffix}!" in fetch("/")
+    home_api = get_json("/")
+    token_payload = json.loads(home_api["message"])
+    assert token_payload["sub"]
+    try:
+        get_json("/", build_opener(HTTPCookieProcessor(CookieJar())))
+    except HTTPError as exc:
+        assert exc.code == 401
+    else:
+        raise AssertionError("unauthenticated JSON GET / should return 401")
     assert "パスワードを変更する" in fetch("/auth/changepass")
     assert "ログアウトする" in fetch("/auth/logout")
 
@@ -153,6 +179,9 @@ def main() -> None:
     assert "<summary>ログを編集</summary>" not in thread_html
     assert "<summary>ログを削除</summary>" not in thread_html
     assert 'class="modal-shell" hidden' in thread_html
+    guest_thread = fetch_guest(created_path)
+    assert "smoke response" not in guest_thread
+    assert "返信一覧はログイン後" in guest_thread
 
     assert (
         post(f"{created_path}/logs/{log_id}/responses", {"content": "child smoke response"})

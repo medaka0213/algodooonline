@@ -1,3 +1,4 @@
+import json
 import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -25,7 +26,7 @@ from algodoo_data.repository import (
 )
 from algodoo_domain.models import LegacyRoute, LikeType
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from mangum import Mangum
 from markupsafe import Markup
@@ -75,6 +76,13 @@ handler = Mangum(app)
 def healthz() -> dict[str, str]:
     return {"status": "ok", "app": "algodooonline"}
 
+
+def _accept_prefers_json(request: Request) -> bool:
+    accept = request.headers.get("accept", "").strip()
+    if not accept:
+        return False
+    first = accept.split(",", maxsplit=1)[0].strip().split(";", maxsplit=1)[0].strip().lower()
+    return first == "application/json"
 
 def _route_or_404(route: str) -> LegacyRoute:
     normalized = route.upper()
@@ -273,9 +281,10 @@ def _board_context(
     selected_thread = get_thread(route, thread_id) if thread_id else None
     if thread_id and selected_thread is None:
         raise HTTPException(status_code=404, detail="thread not found")
+    current = _current_user(request)
     logs = (
         list_logs(selected_thread.thread_id, search_query or None, sort or None)
-        if selected_thread
+        if selected_thread and current
         else []
     )
     top_level_logs = [log for log in logs if not log.response_to]
@@ -310,8 +319,14 @@ def _board_context(
     }
 
 
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request) -> HTMLResponse:
+@app.get("/", response_model=None)
+def home(request: Request) -> HTMLResponse | JSONResponse:
+    if _accept_prefers_json(request):
+        user = _current_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="authentication required")
+        payload = {"sub": user["sub"], "name": user["name"], "token_use": "id"}
+        return JSONResponse({"message": json.dumps(payload, ensure_ascii=False)})
     return templates.TemplateResponse(
         request=request,
         name="index.html",
