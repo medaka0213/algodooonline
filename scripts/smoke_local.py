@@ -20,7 +20,7 @@ class ThreadLinkParser(HTMLParser):
         attr_map = dict(attrs)
         href = attr_map.get("href")
         class_name = attr_map.get("class", "")
-        if href and "thread-item" in class_name:
+        if href and "thread-link" in class_name:
             self.thread_href = href
 
 
@@ -66,6 +66,19 @@ def first_thread_path(route: str) -> str:
     if not parser.thread_href:
         raise AssertionError(f"{route} thread list did not render a thread link")
     return parser.thread_href
+
+
+def assert_thread_list_layout(route: str, thread_path: str, *, expect_preview: bool) -> None:
+    html = fetch(f"/i/{route}")
+    assert '<a class="thread-item"' not in html
+    assert '<div class="thread-item' in html
+    assert 'class="thread-link thread-item-body"' in html
+    assert f'href="{thread_path}"' in html
+    assert f'action="{thread_path}/like"' in html
+    assert 'class="like-icon"' in html
+    assert "like-symbol" not in html
+    if expect_preview:
+        assert 'class="thread-preview"' in html
 
 
 def main() -> None:
@@ -114,6 +127,8 @@ def main() -> None:
     assert f"Smoke {suffix}" in thread_html
     assert "created by local smoke test" in thread_html
     assert "このスレッドに返信する" in thread_html
+    assert_thread_list_layout("BBS", created_path, expect_preview=False)
+    assert post(f"{created_path}/like", {"type": "good", "next": "/i/BBS"}) == "/i/BBS"
 
     assert f'<span class="bg-warning">Smoke</span> {suffix}' in fetch("/i/BBS?q=Smoke&sort=BEST")
 
@@ -126,13 +141,43 @@ def main() -> None:
     assert post(f"{created_path}/logs", {"content": "smoke response"}) == created_path
     logs = api("GET", f"/bbslogs/{created_path.rsplit('/', 1)[-1]}")["submitions"]
     log_id = next(item["log_id"] for item in logs if item["content"] == "smoke response")
-    assert "smoke response" in fetch(created_path)
+    thread_html = fetch(created_path)
+    assert "smoke response" in thread_html
+    assert "log-reply-toggle" in thread_html
+    assert "modal-log-preview" in thread_html
+    assert 'data-modal-close aria-label="閉じる"' in thread_html
+    assert "<summary>ログを編集</summary>" not in thread_html
+    assert "<summary>ログを削除</summary>" not in thread_html
+    assert 'class="modal-shell" hidden' in thread_html
 
     assert (
         post(f"{created_path}/logs/{log_id}/responses", {"content": "child smoke response"})
         == created_path
     )
-    assert "1件の返信" in fetch(created_path)
+    logs = api("GET", f"/bbslogs/{created_path.rsplit('/', 1)[-1]}")["submitions"]
+    child_log_id = next(
+        item["log_id"] for item in logs if item["content"] == "child smoke response"
+    )
+    thread_html = fetch(created_path)
+    assert "1件の返信" in thread_html
+    assert f'action="{created_path}/logs/{child_log_id}/like"' in thread_html
+    assert f'action="{created_path}/logs/{child_log_id}/responses"' in thread_html
+    assert (
+        post(
+            f"{created_path}/logs/{child_log_id}/responses",
+            {"content": "grandchild smoke response"},
+        )
+        == created_path
+    )
+    logs = api("GET", f"/bbslogs/{created_path.rsplit('/', 1)[-1]}")["submitions"]
+    grandchild = next(item for item in logs if item["content"] == "grandchild smoke response")
+    assert grandchild["response_to"] == child_log_id
+    thread_html = fetch(created_path)
+    assert "grandchild smoke response" in thread_html
+    assert f'action="{created_path}/logs/{grandchild["log_id"]}/like"' in thread_html
+    assert f'action="{created_path}/logs/{grandchild["log_id"]}/responses"' in thread_html
+    assert "<summary>ログを編集</summary>" not in thread_html
+    assert "<summary>ログを削除</summary>" not in thread_html
 
     assert (
         post(f"{created_path}/logs/{log_id}/edit", {"content": "edited smoke response"})
@@ -162,6 +207,7 @@ def main() -> None:
         "/i/WIKI/threads",
         {"title": f"Wiki {suffix}", "content": "## Markdown smoke\n\n**bold**", "filedata": ""},
     )
+    assert_thread_list_layout("WIKI", wiki_path, expect_preview=False)
     assert "<h2>Markdown smoke</h2>" in fetch(wiki_path)
 
     image_data_url = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w=="
@@ -172,7 +218,7 @@ def main() -> None:
     image_html = fetch(image_path)
     assert "uploaded image" in image_html
     assert "slide-image" in image_html
-    assert "thread-preview" in fetch("/i/IMAGE")
+    assert_thread_list_layout("IMAGE", image_path, expect_preview=True)
 
     data_path = post(
         "/i/DATA/threads",
@@ -185,6 +231,7 @@ def main() -> None:
     data_html = fetch(data_path)
     assert "ダウンロード" in data_html
     assert "DATA/sample.phz" in data_html
+    assert_thread_list_layout("DATA", data_path, expect_preview=True)
 
     api_thread = api(
         "POST",

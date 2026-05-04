@@ -664,22 +664,32 @@ Docker Compose 起動後に、ブラウザまたはHTTPテストだけで以下�
 
 ## 18. 現実装との差分
 
-2026-05-03時点のこのリポジトリ実装は、この仕様を満たした完成品ではない。少なくとも以下は未達として扱う。
+2026-05-04時点で、`../Algon2-APP` と `../Algon2-API` を再確認した結果、このリポジトリ実装にはまだ以下の残件がある。ここには、すでに修正済みのスレッド一覧Likeクリック領域、ログ返信の入れ子表示、返信ログのLike表示、ログ編集・削除ボタンのメニュー外露出は含めない。
 
-- `/` が旧ホームではなく `/BBS` リダイレクトになっている。
-- 旧正規ルート `/i/:route`, `/i/:route/:thread_id` が実装されていない。
-- 旧Navbarの `AlgodooOnline [ver 2.0]`, サイトマップ、認証ドロップダウンが再現されていない。
-- `/auth/login` を含む認証画面一式が再現されていない。
-- 旧Bootstrap風の中央container・認証カード・ホームのオレンジ見出しが再現されていない。
-- スレッド投稿・ログ投稿が旧モーダル仕様になっていない。
-- 未ログイン時の `ログインしてください` 導線が旧仕様通りではない。
-- `IMAGE` のアップロード、サムネイル、スライドショーが未完成。
-- `DATA` のPHZ/PHNアップロード、サムネイル抽出、ダウンロードが未完成。
-- Markdownの旧sanitizer相当が未完成。
-- 削除が旧soft delete表示ではなく物理削除寄りになっている箇所がある。
-- Like APIに旧 `/like`, `/like/{post_id}/own`, `/like/own/batch` の完全互換が足りない。
-- 旧APIのbody `{"submition": ...}` 互換が完全ではない。
-- 旧レスポンスキーとPydanticモデルの上限値に差分がある。
-- ログイン必須の取得・投稿・本人メニュー制御が旧仕様通りではない。
+今回確認した旧実装範囲は以下。
 
-この差分を解消してから、実装完了として扱う。
+- 画面: `../Algon2-APP/src/components/05_Pages/BBSListPage.js`, `../Algon2-APP/src/components/05_Pages/BBSDetailPage.js`
+- 掲示板部品: `../Algon2-APP/src/components/02_Molecules/ThreadListItem.js`, `../Algon2-APP/src/components/02_Molecules/ThreadInfoBody.js`, `../Algon2-APP/src/components/02_Molecules/LogItem.js`
+- 本文・添付部品: `../Algon2-APP/src/components/01_Atoms/bbs_items/ThreadBody.js`, `LogBody.js`, `MarkdownBody.js`, `DownloadPHZ.js`
+- フォーム・モーダル: `../Algon2-APP/src/components/02_Molecules/Forms/ThreadForm.js`, `LogForm.js`, `SearchForm.js`, `DeleteForm.js`, `../Algon2-APP/src/components/01_Atoms/layouts/Modal.js`, `../Algon2-APP/src/components/01_Atoms/parts/Dropzone.js`, `Inputs.js`, `SlideShow.js`
+- 旧API: `../Algon2-API/app.py`, `../Algon2-API/chalicelib/post.py`, `schema.py`, `file.py`, `phz.py`
+
+現在残っている差分は以下。これらを解消するまで、移植完了として扱わない。
+
+1. 認証付き旧互換APIの認可が足りない。旧APIは `CognitoUserPoolAuthorizer` と `x-api-key` を要求するが、現実装の `/threads`, `/bbslogs`, `/like`, `/user` 互換APIはCookie未設定でも多くが実行でき、`user_id` もbody由来または `anonymous` になっている。
+2. 旧Cognitoセッション更新が未実装。旧フロントは `idToken` 失効前に `refreshToken` で更新し、失敗時だけ未ログインに戻すが、現実装はローカルCookieの有無だけを見ている。
+3. ID形式が旧ULIDではない。旧APIは `BBS_01...` のような `ulid.new().str` 形式で `thread_id` / `log_id` を作るが、現実装は `uuid4().hex` を使っている。
+4. ファイル投稿の保存処理が旧仕様ではない。旧APIはData URLを検証してS3キー `IMAGE/{thread_id}_{index}...` / `DATA/{thread_id}_{index}...` へ保存し、DBにはファイルキーを残すが、現実装はフォーム値のData URLまたは任意文字列をそのまま `filedata` に保存できる。
+5. `IMAGE` 投稿のクライアント処理が旧仕様ではない。旧フロントは `Jimp` で画像をJPEG Data URLへ変換してから送るが、現実装は `FileReader.readAsDataURL` の結果をそのまま入れるだけで、JPEG化も旧API相当のContent-Type制限もない。
+6. `DATA` 投稿のPHZ/PHN処理が旧仕様ではない。旧フロントは `JSZip` でPHZ内の `thumb.png` を抽出し、旧APIは `scene.phn`, `checksums.txt`, `thumb.png` と文字コード・画像妥当性を検証するが、現実装はzip検証、PHZサムネイル抽出、PHN文字コード検証をしていない。
+7. `DATA` 詳細のダウンロードブロックが旧 `DownloadPHZ` と違う。旧画面は先頭PHZのサムネイルを大きく表示し、黄色枠の `ダウンロード` リンクを `REACT_APP_IMAGE_URL + "/" + filedata[0]` へ張るが、現実装は `filedata` 全件を生のhrefで並べている。
+8. `IMAGE` 詳細のスライドショーが旧 `SlideShow` と違う。旧画面は `react-slick` のメイン画像とサムネイルナビ、左右矢印、swipeを持つが、現実装は画像を縦に並べるだけで、サムネイルナビや矢印操作がない。
+9. `WIKI` / `IMAGE` / `DATA` の投稿・編集フォームが旧Markdownエディタではない。旧 `ThreadForm` は `SimpleMDE` を使うが、現実装は通常textareaで、EasyMDEのUI、プレビュー、編集体験がない。
+10. ログ本文のMarkdown表示が旧仕様と違う。旧 `LogBody` はrouteが `WIKI`, `IMAGE`, `DATA` の場合 `MarkdownBody` でログ本文もMarkdown表示するが、現実装のログ本文は全routeでプレーンテキスト風の `highlight` 表示になっている。
+11. Markdown変換とsanitizerが旧仕様に足りない。旧 `MarkdownBody` は `marked` を使い、HTMLタグ・属性を独自sanitizerで制御するが、現実装は見出し、太字、インラインコード程度の簡易regex変換で、旧Markdown互換にも旧sanitizer互換にも達していない。
+12. ログ検索で孫以降の返信がマッチした場合の親展開が足りない。旧 `search_logs` は `eneble_response_parent` で祖先を再帰的に `disabled: false` に戻すが、現実装の `list_logs` は直接の親だけを戻すため、孫返信だけが検索にマッチするとルート親まで表示されない可能性がある。
+13. ログ一覧の初期並びが旧画面と違う。旧 `getLogs` は取得後に `NEWEST_UPDATED` で並べるが、現実装の `list_logs` はsort未指定時に `NEWEST_CREATED` を既定にしている。
+14. サーバー側バリデーションエラーの形と表示が旧仕様と違う。旧APIはCerberusの `errors` を返し、旧フロントは `Server-side Error` から始まる複数行文字列として `.form-error` に出すが、現実装はエラー値が文字列で、サーバーレンダリングフォーム側も失敗理由を同じ形で表示しない。
+15. ユーザー移行用属性が不足している。旧 `UserSchema` は `v1_id`, `v1_name`, `v1_password` を持つが、現実装の `UserProfile` / `UserRecord` は主に `v1_password` だけで、v1ユーザー情報の保持範囲が旧仕様より狭い。
+
+上記残件は、画面見た目だけでなく旧サービスの操作結果、保存データ、API互換、添付ファイルの扱いに直結するため、個別に旧実装を参照して修正し、対応する `scripts/smoke_local.py` の確認項目を追加すること。
