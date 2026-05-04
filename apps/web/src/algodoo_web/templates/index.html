@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AlgodooOnline [ver 2.0]</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css" />
     <style>
       * { box-sizing: border-box; }
       body {
@@ -297,6 +298,85 @@
         object-fit: contain;
         border: 1px solid #dee2e6;
       }
+      .slideshow-carousel {
+        margin: 1rem 0;
+        max-width: 100%;
+      }
+      .slideshow-carousel .slide-stage {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: .25rem;
+        min-height: 220px;
+      }
+      .slideshow-carousel .slide-main {
+        max-width: 100%;
+        max-height: 360px;
+        object-fit: contain;
+        margin: 0 2.5rem;
+      }
+      .slideshow-carousel .slide-arrow {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 2.25rem;
+        height: 2.25rem;
+        border: 1px solid #ced4da;
+        border-radius: 50%;
+        background: #fff;
+        font-size: 1.5rem;
+        line-height: 1;
+        cursor: pointer;
+        z-index: 2;
+      }
+      .slideshow-carousel .slide-prev { left: .35rem; }
+      .slideshow-carousel .slide-next { right: .35rem; }
+      .slideshow-carousel .slide-thumbs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .35rem;
+        margin-top: .5rem;
+        justify-content: center;
+      }
+      .slideshow-carousel .slide-thumb {
+        padding: 0;
+        border: 2px solid transparent;
+        border-radius: .2rem;
+        background: #fff;
+        cursor: pointer;
+        line-height: 0;
+      }
+      .slideshow-carousel .slide-thumb.is-active { border-color: #ffc107; }
+      .slideshow-carousel .slide-thumb img {
+        width: 56px;
+        height: 56px;
+        object-fit: cover;
+        display: block;
+      }
+      .download-phz-wrap { margin: 1rem 0; }
+      .download-phz-hero-thumb {
+        display: block;
+        max-width: min(100%, 420px);
+        max-height: 280px;
+        object-fit: contain;
+        margin-bottom: .75rem;
+        border: 3px solid #ffc107;
+        border-radius: .25rem;
+        padding: .25rem;
+        background: #fffbeb;
+      }
+      .download-phz-link {
+        display: inline-block;
+        padding: .5rem 1rem;
+        border: 3px solid #ffc107;
+        border-radius: .25rem;
+        background: #fff3cd;
+        font-weight: 600;
+      }
+      .download-phz-link:hover { text-decoration: none; background: #ffe69c; }
       .log-item {
         padding: 1rem 0;
         border-top: 1px solid #dee2e6;
@@ -462,16 +542,26 @@
             <p class="deleted">この返信は削除されました</p>
             {% else %}
             <details class="log-reply-toggle">
-              <summary><div class="log-body">{{ log.content|highlight(search_query) }}</div></summary>
+              <summary>
+                {% if active_route.value == "BBS" %}
+                <div class="log-body">{{ log.content|highlight(search_query) }}</div>
+                {% else %}
+                <div class="log-body markdown-body">{{ log.content|markdown }}</div>
+                {% endif %}
+              </summary>
               <div class="modal-body">
                 <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>このログに返信する</h2>
                 <div class="modal-log-preview">
                   <div class="meta"><strong>{{ log.user_name }}</strong><span>{{ log.updated_at|relative }}</span>{% if log.is_edited %}<span>編集済み</span>{% endif %}</div>
+                  {% if active_route.value == "BBS" %}
                   <div class="log-body">{{ log.content|highlight(search_query) }}</div>
+                  {% else %}
+                  <div class="log-body markdown-body">{{ log.content|markdown }}</div>
+                  {% endif %}
                 </div>
                 {% if current_user %}
                 <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/responses">
-                  <div class="form-group"><label>content<textarea class="form-control" name="content" required maxlength="32000"></textarea></label></div>
+                  <div class="form-group"><label>content<textarea class="form-control{% if active_route.value != 'BBS' %} thread-md-editor{% endif %}" name="content" required maxlength="32000"></textarea></label></div>
                   <button class="btn btn-primary" type="submit">Submit</button>
                 </form>
                 {% else %}
@@ -486,7 +576,7 @@
               <div class="modal-body">
                 <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>ログを編集する</h2>
                 <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/edit">
-                  <div class="form-group"><label>content<textarea class="form-control" name="content" required maxlength="32000">{{ log.content }}</textarea></label></div>
+                  <div class="form-group"><label>content<textarea class="form-control{% if active_route.value != 'BBS' %} thread-md-editor{% endif %}" name="content" required maxlength="32000">{{ log.content }}</textarea></label></div>
                   <button class="btn btn-primary" type="submit">Submit</button>
                 </form>
               </div>
@@ -657,6 +747,9 @@
         <li class="active">{{ active_route.value }}</li>
         {% endif %}
       </ol>
+      {% if form_error %}
+      <p class="form-error">{{ form_error }}</p>
+      {% endif %}
 
       {% if not selected_thread %}
       <details class="modal-toggle">
@@ -722,15 +815,22 @@
       {% set own_selected_thread_like = selected_thread_own_like|default({}) %}
       <article class="post-detail">
         {% if active_route.value == "DATA" and selected_thread.filedata %}
-        <div class="download-block">
-          {% for file in selected_thread.filedata %}
-            {% if file|is_thumb %}<img class="data-thumb" src="{{ file }}" alt="thumbnail" />{% else %}<a href="{{ file }}">ダウンロード</a>{% endif %}
-          {% endfor %}
+        <div class="download-phz-wrap">
+          {% if data_primary_thumb_url %}
+          <img class="download-phz-hero-thumb" src="{{ data_primary_thumb_url }}" alt="" />
+          {% endif %}
+          {% if data_primary_phz_url %}
+          <p><a class="download-phz-link" href="{{ data_primary_phz_url }}">ダウンロード</a></p>
+          {% endif %}
+          <div class="attachment-list">
+            {% for file in selected_thread.filedata %}<a class="attachment" href="{{ file|media_url }}">{{ file[0:80] }}</a>{% endfor %}
+          </div>
         </div>
         {% endif %}
         <h1>{{ selected_thread.title }}</h1>
         <div class="post-row">
           <div class="like-box">
+            {% if current_user %}
             <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/like">
               <input type="hidden" name="next" value="{{ current_path_with_query }}" />
               {% if own_selected_thread_like.type == "good" %}
@@ -741,6 +841,10 @@
               <button class="like-button{% if own_selected_thread_like.type == "good" %} is-liked{% endif %}" type="submit" aria-label="like"><svg class="like-icon" viewBox="0 0 1024 1024" aria-hidden="true"><path d="M1024 512 512 0 0 512h288v512h448V512z"></path></svg></button>
             </form>
             <span class="like-score">{{ like_summary.n_total }}</span>
+            {% else %}
+            <span class="like-readonly" aria-hidden="true">▲</span>
+            <span class="like-score">{{ like_summary.n_total }}</span>
+            {% endif %}
           </div>
           <div>
             <div class="post-head">
@@ -765,14 +869,23 @@
             {% else %}
             <div class="markdown-body">{{ selected_thread.content|markdown }}</div>
             {% endif %}
-            {% if active_route.value == "IMAGE" and selected_thread.filedata %}
-            <div class="slideshow">
-              {% for file in selected_thread.filedata %}{% if file|is_image %}<img class="slide-image" src="{{ file }}" alt="uploaded image" />{% endif %}{% endfor %}
+            {% if active_route.value == "IMAGE" and image_slide_urls|length %}
+            <div id="image-slideshow" class="slideshow-carousel">
+              <div class="slide-stage">
+                <button type="button" class="slide-arrow slide-prev" aria-label="前へ">‹</button>
+                <img class="slide-main" src="{{ image_slide_urls[0] }}" alt="uploaded image" />
+                <button type="button" class="slide-arrow slide-next" aria-label="次へ">›</button>
+              </div>
+              <div class="slide-thumbs">
+                {% for u in image_slide_urls %}
+                <button type="button" class="slide-thumb{% if loop.first %} is-active{% endif %}" data-slide-src="{{ u }}" aria-label="画像{{ loop.index }}"><img src="{{ u }}" alt="" /></button>
+                {% endfor %}
+              </div>
             </div>
             {% endif %}
             {% if selected_thread.filedata %}
             <div class="attachment-list">
-              {% for file in selected_thread.filedata %}<a class="attachment" href="{{ file }}">{{ file[0:80] }}</a>{% endfor %}
+              {% for file in selected_thread.filedata %}<a class="attachment" href="{{ file|media_url }}">{{ file[0:80] }}</a>{% endfor %}
             </div>
             {% endif %}
           </div>
@@ -806,7 +919,7 @@
           {% if current_user %}
           <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>このスレッドに返信する</h2>
           <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs">
-            <div class="form-group"><label>content<textarea class="form-control" name="content" required maxlength="32000"></textarea></label></div>
+            <div class="form-group"><label>content<textarea class="form-control{% if active_route.value != 'BBS' %} thread-md-editor{% endif %}" name="content" required maxlength="32000"></textarea></label></div>
             <button class="btn btn-primary" type="submit">Submit</button>
           </form>
           {% else %}
@@ -815,6 +928,7 @@
           {% endif %}
         </div>
       </details>
+      {% if current_user %}
       <form class="search-form" method="get" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}">
         <input class="form-control" name="q" value="{{ search_query }}" placeholder="返信を検索する" />
         <button class="btn btn-primary" type="submit">Submit</button>
@@ -826,11 +940,28 @@
       {% for log in top_level_logs %}
       {{ render_log_item(log, active_route, selected_thread, current_user, search_query, responses_by_log, log_like_summary, log_own_likes) }}
       {% endfor %}
+      {% else %}
+      <p class="login-hint"><a href="/auth/login">ログインしてください</a>（返信一覧はログイン後に表示されます。）</p>
+      {% endif %}
       {% endif %}
       {% endif %}
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
     <script>
+      if (typeof EasyMDE !== "undefined") {
+        document.querySelectorAll("textarea.thread-md-editor").forEach(function (el) {
+          if (el.dataset.mdInit) return;
+          el.dataset.mdInit = "1";
+          new EasyMDE({
+            element: el,
+            spellChecker: false,
+            status: false,
+            minHeight: "200px",
+            autoDownloadFontAwesome: false,
+          });
+        });
+      }
       document.querySelectorAll("[data-open-modal]").forEach(function (button) {
         button.addEventListener("click", function (event) {
           event.preventDefault();
@@ -865,18 +996,82 @@
           if (!target) return;
           var names = [];
           var loaded = [];
+          var wantJpeg = input.dataset.requireJpeg === "1";
           Array.prototype.forEach.call(input.files || [], function (file) {
             names.push(file.name);
             var reader = new FileReader();
             reader.onload = function () {
-              loaded.push(reader.result);
-              target.value = loaded.join("\n");
-              if (list) list.textContent = names.length + "件: " + names.join(", ");
+              var result = reader.result;
+              if (wantJpeg && typeof result === "string" && result.indexOf("image/jpeg") !== 5) {
+                var img = new Image();
+                img.onload = function () {
+                  try {
+                    var c = document.createElement("canvas");
+                    c.width = img.naturalWidth;
+                    c.height = img.naturalHeight;
+                    var ctx = c.getContext("2d");
+                    ctx.drawImage(img, 0, 0);
+                    result = c.toDataURL("image/jpeg", 0.92);
+                  } catch (e) {}
+                  loaded.push(result);
+                  target.value = loaded.join("\n");
+                  if (list) list.textContent = names.length + "件: " + names.join(", ");
+                };
+                img.src = result;
+              } else {
+                loaded.push(result);
+                target.value = loaded.join("\n");
+                if (list) list.textContent = names.length + "件: " + names.join(", ");
+              }
             };
             reader.readAsDataURL(file);
           });
         });
       });
+      (function () {
+        var root = document.getElementById("image-slideshow");
+        if (!root) return;
+        var main = root.querySelector(".slide-main");
+        var thumbs = root.querySelectorAll(".slide-thumb");
+        var urls = Array.prototype.map.call(thumbs, function (b) {
+          return b.getAttribute("data-slide-src");
+        });
+        var idx = 0;
+        function show(i) {
+          idx = (i + urls.length) % urls.length;
+          main.src = urls[idx];
+          thumbs.forEach(function (b, j) {
+            b.classList.toggle("is-active", j === idx);
+          });
+        }
+        root.querySelector(".slide-prev").addEventListener("click", function () {
+          show(idx - 1);
+        });
+        root.querySelector(".slide-next").addEventListener("click", function () {
+          show(idx + 1);
+        });
+        thumbs.forEach(function (b, j) {
+          b.addEventListener("click", function () {
+            show(j);
+          });
+        });
+        var sx = 0;
+        root.querySelector(".slide-stage").addEventListener(
+          "touchstart",
+          function (e) {
+            sx = e.changedTouches[0].screenX;
+          },
+          { passive: true }
+        );
+        root.querySelector(".slide-stage").addEventListener(
+          "touchend",
+          function (e) {
+            var dx = e.changedTouches[0].screenX - sx;
+            if (Math.abs(dx) > 50) show(dx < 0 ? idx + 1 : idx - 1);
+          },
+          { passive: true }
+        );
+      })();
     </script>
   </body>
 </html>

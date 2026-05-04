@@ -7,6 +7,7 @@ dependencies = [
   "algodoo-domain",
   "boto3>=1.34.79",
   "ddb-single",
+  "python-ulid>=2,<3",
 ]
 
 [tool.uv.sources]

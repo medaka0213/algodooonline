@@ -11,6 +11,7 @@ services:
       DDB_TABLE_NAME: algodoo-main-local
       DDB_ENDPOINT_URL: http://127.0.0.1:8001
       SEED_DEMO_DATA: "true"
+      LEGACY_X_API_KEY: local-x-api-key
       UV_LINK_MODE: copy
     ports:
       - "8080:8000"

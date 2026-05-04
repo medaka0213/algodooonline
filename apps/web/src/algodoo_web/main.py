@@ -1,10 +1,13 @@
+import json
 import re
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs
 
+import bleach
+import markdown
 from algodoo_data.repository import (
     create_like,
     create_log,
@@ -23,15 +26,19 @@ from algodoo_data.repository import (
     update_log_details,
     update_thread_details,
 )
+from algodoo_data.uploads import validate_thread_filedata
 from algodoo_domain.models import LegacyRoute, LikeType
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from mangum import Mangum
 from markupsafe import Markup
+from starlette.staticfiles import StaticFiles
 
 from algodoo_web.api import router as api_router
+from algodoo_web.asset_store import media_public_url, media_root, normalize_and_persist_filedata
 from algodoo_web.bootstrap import bootstrap_data
+from algodoo_web.session_refresh import LocalSessionRefreshMiddleware, parse_session_expiry
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -66,8 +73,12 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="algodooonline", version="0.1.0", lifespan=lifespan)
+app.add_middleware(LocalSessionRefreshMiddleware)
 app.include_router(api_router)
 app.include_router(api_router, prefix="/api")
+MEDIA_DIR = media_root()
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 handler = Mangum(app)
 
 
@@ -75,6 +86,13 @@ handler = Mangum(app)
 def healthz() -> dict[str, str]:
     return {"status": "ok", "app": "algodooonline"}
 
+
+def _accept_prefers_json(request: Request) -> bool:
+    accept = request.headers.get("accept", "").strip()
+    if not accept:
+        return False
+    first = accept.split(",", maxsplit=1)[0].strip().split(";", maxsplit=1)[0].strip().lower()
+    return first == "application/json"
 
 def _route_or_404(route: str) -> LegacyRoute:
     normalized = route.upper()
@@ -95,6 +113,9 @@ async def _form_data(request: Request) -> dict[str, str]:
 def _current_user(request: Request) -> dict[str, str] | None:
     token = request.cookies.get("algodoo_idtoken")
     if not token:
+        return None
+    refresh_deadline = parse_session_expiry(request.cookies.get("algodoo_refresh_exp", ""))
+    if refresh_deadline is not None and refresh_deadline < datetime.now(UTC):
         return None
     name = request.cookies.get("algodoo_name") or "anonymous"
     sub = request.cookies.get("algodoo_sub") or f"local-{name}"
@@ -117,6 +138,40 @@ def _require_user(request: Request) -> dict[str, str]:
 
 def _filedata_from_form(value: str) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
+
+
+def _server_side_error_message(errors: dict[str, str]) -> str:
+    lines = ["Server-side Error"] + [f"{k}: {v}" for k, v in errors.items()]
+    return "\n".join(lines)
+
+
+def _validate_thread_form_fields(title: str, content: str) -> dict[str, str] | None:
+    errs: dict[str, str] = {}
+    if not title.strip():
+        errs["title"] = "required"
+    if len(title) > 32:
+        errs["title"] = "max length is 32"
+    if not content.strip():
+        errs["content"] = "required"
+    if len(content) > 32000:
+        errs["content"] = "max length is 32000"
+    return errs or None
+
+
+def _data_download_context(filedata: list[str] | None) -> dict[str, str]:
+    files = filedata or []
+    primary = next((f for f in files if f.lower().endswith(".phz")), "")
+    thumb = next((f for f in files if _is_thumb(f)), "")
+    if not thumb and primary:
+        cand = f"{primary[:-4]}_thumb.png"
+        if cand in files:
+            thumb = cand
+    return {
+        "data_primary_phz": primary,
+        "data_primary_phz_url": media_public_url(primary) if primary else "",
+        "data_primary_thumb": thumb,
+        "data_primary_thumb_url": media_public_url(thumb) if thumb else "",
+    }
 
 
 def _wants_delete(form: dict[str, str]) -> bool:
@@ -156,20 +211,53 @@ def _snippet(value: str, query_text: str, length: int = 300) -> str:
 
 
 def _markdown(value: str) -> Markup:
-    if value.lstrip().startswith(("<!", "<?", "<\\")):
+    if not value or value.lstrip().startswith(("<!", "<?", "<\\")):
         return Markup("")
-    safe = escape(value)
-    safe = re.sub(r"^### (.+)$", r"<h3>\1</h3>", safe, flags=re.MULTILINE)
-    safe = re.sub(r"^## (.+)$", r"<h2>\1</h2>", safe, flags=re.MULTILINE)
-    safe = re.sub(r"^# (.+)$", r"<h1>\1</h1>", safe, flags=re.MULTILINE)
-    safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
-    safe = re.sub(r"`([^`]+)`", r"<code>\1</code>", safe)
-    paragraphs = [
-        line if line.startswith("<h") else f"<p>{line}</p>"
-        for line in safe.splitlines()
-        if line.strip()
-    ]
-    return Markup("\n".join(paragraphs))
+    raw_html = markdown.markdown(
+        value,
+        extensions=["fenced_code", "tables", "nl2br", "sane_lists"],
+    )
+    allowed_tags = frozenset(
+        bleach.sanitizer.ALLOWED_TAGS
+        | {
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "pre",
+            "code",
+            "p",
+            "br",
+            "blockquote",
+            "hr",
+            "ul",
+            "ol",
+            "li",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+            "img",
+        }
+    )
+    allowed_attrs = {
+        "a": ["href", "title", "rel"],
+        "img": ["src", "alt", "title", "loading"],
+        "code": ["class"],
+        "th": ["align"],
+        "td": ["align"],
+    }
+    cleaned = bleach.clean(
+        raw_html,
+        tags=allowed_tags,
+        attributes=allowed_attrs,
+        strip=True,
+    )
+    return Markup(cleaned)
 
 
 def _relative(value: str) -> str:
@@ -204,10 +292,14 @@ def _relative(value: str) -> str:
 
 
 def _is_image(value: str) -> bool:
+    if not value:
+        return False
     lowered = value.lower()
-    return lowered.startswith("data:image/") or lowered.endswith(
-        (".jpg", ".jpeg", ".png", ".gif", ".webp")
-    )
+    if lowered.startswith("data:image/"):
+        return True
+    if lowered.startswith("image/"):
+        return True
+    return lowered.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))
 
 
 def _is_thumb(value: str) -> bool:
@@ -217,17 +309,21 @@ def _is_thumb(value: str) -> bool:
 def _first_image(values: list[str] | None) -> str:
     for value in values or []:
         if _is_image(value):
-            return value
+            return media_public_url(value)
     return ""
 
 
 def _first_data_thumb(values: list[str] | None) -> str:
-    for value in values or []:
+    vals = values or []
+    for value in vals:
         if _is_thumb(value):
-            return value
-    first = next(iter(values or []), "")
-    if first.lower().endswith(".phz"):
-        return f"{first[:-4]}_thumb.png"
+            return media_public_url(value)
+    for value in vals:
+        if value.lower().endswith(".phz"):
+            candidate = f"{value[:-4]}_thumb.png"
+            if candidate in vals:
+                return media_public_url(candidate)
+            return media_public_url(candidate)
     return ""
 
 
@@ -239,6 +335,7 @@ templates.env.filters["is_image"] = _is_image
 templates.env.filters["is_thumb"] = _is_thumb
 templates.env.filters["first_image"] = _first_image
 templates.env.filters["first_data_thumb"] = _first_data_thumb
+templates.env.filters["media_url"] = media_public_url
 
 
 def _base_context(request: Request) -> dict[str, object]:
@@ -266,6 +363,8 @@ def _board_context(
     request: Request,
     route: LegacyRoute,
     thread_id: str | None = None,
+    *,
+    form_error: str | None = None,
 ) -> dict[str, object]:
     search_query = request.query_params.get("q", "").strip()
     sort = request.query_params.get("sort", "")
@@ -273,17 +372,29 @@ def _board_context(
     selected_thread = get_thread(route, thread_id) if thread_id else None
     if thread_id and selected_thread is None:
         raise HTTPException(status_code=404, detail="thread not found")
+    current = _current_user(request)
     logs = (
         list_logs(selected_thread.thread_id, search_query or None, sort or None)
-        if selected_thread
+        if selected_thread and current
         else []
     )
     top_level_logs = [log for log in logs if not log.response_to]
-    responses_by_log = {
-        log.log_id: [reply for reply in logs if reply.response_to == log.log_id]
-        for log in logs
-    }
+    responses_by_log: dict[str, list] = {}
+    for reply in logs:
+        parent = reply.response_to
+        if parent:
+            responses_by_log.setdefault(parent, []).append(reply)
     current_user = _current_user(request)
+    data_ctx = (
+        _data_download_context(selected_thread.filedata)
+        if selected_thread and route == LegacyRoute.DATA
+        else {
+            "data_primary_phz": "",
+            "data_primary_phz_url": "",
+            "data_primary_thumb": "",
+            "data_primary_thumb_url": "",
+        }
+    )
     return {
         **_base_context(request),
         "page": "board",
@@ -307,11 +418,24 @@ def _board_context(
         "log_own_likes": (
             _build_own_likes(logs, current_user)
         ),
+        "form_error": form_error,
+        "image_slide_urls": (
+            [media_public_url(f) for f in (selected_thread.filedata or []) if _is_image(f)]
+            if selected_thread and route == LegacyRoute.IMAGE
+            else []
+        ),
+        **data_ctx,
     }
 
 
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request) -> HTMLResponse:
+@app.get("/", response_model=None)
+def home(request: Request) -> HTMLResponse | JSONResponse:
+    if _accept_prefers_json(request):
+        user = _current_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="authentication required")
+        payload = {"sub": user["sub"], "name": user["name"], "token_use": "id"}
+        return JSONResponse({"message": json.dumps(payload, ensure_ascii=False)})
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -373,6 +497,7 @@ async def login_submit(request: Request):
             sub=f"local-{username}",
         )
     response = RedirectResponse(url="/", status_code=303)
+    now = datetime.now(UTC)
     response.set_cookie("algodoo_name", username, httponly=True, samesite="lax")
     response.set_cookie("algodoo_sub", user.sub, httponly=True, samesite="lax")
     response.set_cookie("algodoo_idtoken", f"local-token-{username}", httponly=True, samesite="lax")
@@ -382,7 +507,18 @@ async def login_submit(request: Request):
         httponly=True,
         samesite="lax",
     )
-    response.set_cookie("algodoo_refresh_exp", "local", httponly=True, samesite="lax")
+    response.set_cookie(
+        "algodoo_access_exp",
+        (now + timedelta(minutes=15)).isoformat(),
+        httponly=True,
+        samesite="lax",
+    )
+    response.set_cookie(
+        "algodoo_refresh_exp",
+        (now + timedelta(days=30)).isoformat(),
+        httponly=True,
+        samesite="lax",
+    )
     return response
 
 
@@ -447,6 +583,7 @@ def logout_submit() -> RedirectResponse:
         "algodoo_idtoken",
         "algodoo_refresh",
         "algodoo_refresh_exp",
+        "algodoo_access_exp",
     ]:
         response.delete_cookie(key)
     return response
@@ -495,24 +632,73 @@ async def forgotpass_submit(request: Request):
     )
 
 
-@app.post("/i/{route}/threads")
-async def create_thread_form(request: Request, route: str) -> RedirectResponse:
+@app.post("/i/{route}/threads", response_model=None)
+async def create_thread_form(request: Request, route: str) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
     legacy_route = _route_or_404(route)
     form = await _form_data(request)
+    title = form.get("title", "").strip()
+    content = form.get("content", "").strip()
+    raw_files = _filedata_from_form(form.get("filedata", ""))
+    if errs := _validate_thread_form_fields(title, content):
+        ctx = _board_context(
+            request,
+            legacy_route,
+            form_error=_server_side_error_message(errs),
+        )
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=ctx,
+            status_code=422,
+        )
+    if err := validate_thread_filedata(legacy_route, raw_files):
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                form_error=_server_side_error_message({"filedata": err}),
+            ),
+            status_code=422,
+        )
     thread = create_thread(
         route=legacy_route,
-        title=form.get("title", "").strip(),
-        content=form.get("content", "").strip(),
+        title=title,
+        content=content,
         user_name=user["name"],
         user_id=user["sub"],
-        filedata=_filedata_from_form(form.get("filedata", "")),
+        filedata=[],
     )
+    keys, nerr = normalize_and_persist_filedata(
+        route=legacy_route,
+        thread_id=thread.thread_id,
+        filedata=raw_files,
+    )
+    if nerr:
+        delete_thread(legacy_route, thread.thread_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                form_error=_server_side_error_message({"filedata": nerr}),
+            ),
+            status_code=422,
+        )
+    if keys or raw_files:
+        update_thread_details(legacy_route, thread.thread_id, title, content, keys)
     return RedirectResponse(url=f"/i/{legacy_route.value}/{thread.thread_id}", status_code=303)
 
 
-@app.post("/i/{route}/{thread_id}/edit")
-async def edit_thread_form(request: Request, route: str, thread_id: str) -> RedirectResponse:
+@app.post("/i/{route}/{thread_id}/edit", response_model=None)
+async def edit_thread_form(
+    request: Request,
+    route: str,
+    thread_id: str,
+) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
     legacy_route = _route_or_404(route)
     thread = get_thread(legacy_route, thread_id)
@@ -521,12 +707,56 @@ async def edit_thread_form(request: Request, route: str, thread_id: str) -> Redi
     if thread.user_id != user["sub"]:
         raise HTTPException(status_code=403, detail="forbidden")
     form = await _form_data(request)
+    title = form.get("title", "").strip()
+    content = form.get("content", "").strip()
+    raw_files = _filedata_from_form(form.get("filedata", ""))
+    if errs := _validate_thread_form_fields(title, content):
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message(errs),
+            ),
+            status_code=422,
+        )
+    if err := validate_thread_filedata(legacy_route, raw_files):
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message({"filedata": err}),
+            ),
+            status_code=422,
+        )
+    keys, nerr = normalize_and_persist_filedata(
+        route=legacy_route,
+        thread_id=thread_id,
+        filedata=raw_files,
+    )
+    if nerr:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message({"filedata": nerr}),
+            ),
+            status_code=422,
+        )
     update_thread_details(
         route=legacy_route,
         thread_id=thread_id,
-        title=form.get("title", "").strip(),
-        content=form.get("content", "").strip(),
-        filedata=_filedata_from_form(form.get("filedata", "")),
+        title=title,
+        content=content,
+        filedata=keys,
     )
     return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
 
@@ -545,35 +775,89 @@ async def delete_thread_form(request: Request, route: str, thread_id: str) -> Re
     return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
 
 
-@app.post("/i/{route}/{thread_id}/logs")
-async def create_log_form(request: Request, route: str, thread_id: str) -> RedirectResponse:
+@app.post("/i/{route}/{thread_id}/logs", response_model=None)
+async def create_log_form(
+    request: Request,
+    route: str,
+    thread_id: str,
+) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
     legacy_route = _route_or_404(route)
     if get_thread(legacy_route, thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
     form = await _form_data(request)
+    content = form.get("content", "").strip()
+    if not content:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message({"content": "required"}),
+            ),
+            status_code=422,
+        )
+    if len(content) > 32000:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message({"content": "max length is 32000"}),
+            ),
+            status_code=422,
+        )
     create_log(
         thread_id=thread_id,
-        content=form.get("content", "").strip(),
+        content=content,
         user_name=user["name"],
         user_id=user["sub"],
     )
     return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
 
 
-@app.post("/i/{route}/{thread_id}/logs/{log_id}/responses")
+@app.post("/i/{route}/{thread_id}/logs/{log_id}/responses", response_model=None)
 async def create_response_form(
     request: Request,
     route: str,
     thread_id: str,
     log_id: str,
-) -> RedirectResponse:
+) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
     legacy_route = _route_or_404(route)
     form = await _form_data(request)
+    content = form.get("content", "").strip()
+    if not content:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message({"content": "required"}),
+            ),
+            status_code=422,
+        )
+    if len(content) > 32000:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message({"content": "max length is 32000"}),
+            ),
+            status_code=422,
+        )
     create_log(
         thread_id=thread_id,
-        content=form.get("content", "").strip(),
+        content=content,
         user_name=user["name"],
         user_id=user["sub"],
         response_to=log_id,
@@ -581,13 +865,13 @@ async def create_response_form(
     return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
 
 
-@app.post("/i/{route}/{thread_id}/logs/{log_id}/edit")
+@app.post("/i/{route}/{thread_id}/logs/{log_id}/edit", response_model=None)
 async def edit_log_form(
     request: Request,
     route: str,
     thread_id: str,
     log_id: str,
-) -> RedirectResponse:
+) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
     legacy_route = _route_or_404(route)
     log = list(filter(lambda item: item.log_id == log_id, list_logs(thread_id)))
@@ -596,7 +880,32 @@ async def edit_log_form(
     if log[0].user_id != user["sub"]:
         raise HTTPException(status_code=403, detail="forbidden")
     form = await _form_data(request)
-    update_log_details(thread_id, log_id, form.get("content", "").strip())
+    content = form.get("content", "").strip()
+    if not content:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message({"content": "required"}),
+            ),
+            status_code=422,
+        )
+    if len(content) > 32000:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context=_board_context(
+                request,
+                legacy_route,
+                thread_id,
+                form_error=_server_side_error_message({"content": "max length is 32000"}),
+            ),
+            status_code=422,
+        )
+    update_log_details(thread_id, log_id, content)
     return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
 
 

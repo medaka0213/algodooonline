@@ -1,12 +1,15 @@
 import json
+import os
 import time
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 BASE_URL = "http://127.0.0.1:8000"
 OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
+GUEST_API_OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
 
 
 class ThreadLinkParser(HTMLParser):
@@ -29,6 +32,22 @@ def fetch(path: str) -> str:
         return response.read().decode()
 
 
+def fetch_guest(path: str) -> str:
+    guest = build_opener(HTTPCookieProcessor(CookieJar()))
+    with guest.open(BASE_URL + path, timeout=10) as response:
+        return response.read().decode()
+
+
+def get_json(path: str, opener=OPENER) -> dict:
+    request = Request(
+        BASE_URL + path,
+        method="GET",
+        headers={"Accept": "application/json"},
+    )
+    with opener.open(request, timeout=10) as response:
+        return json.loads(response.read().decode())
+
+
 def final_url(path: str) -> str:
     with OPENER.open(BASE_URL + path, timeout=10) as response:
         response.read()
@@ -48,15 +67,22 @@ def post(path: str, payload: dict[str, str]) -> str:
         return response.geturl().removeprefix(BASE_URL)
 
 
-def api(method: str, path: str, payload: dict | None = None) -> dict:
-    data = json.dumps(payload or {}).encode() if payload is not None else None
+def api(method: str, path: str, payload: dict | None = None, *, opener=None) -> dict:
+    api_key = (os.environ.get("LEGACY_X_API_KEY") or "local-x-api-key").strip()
+    if method.upper() == "GET":
+        data = None
+        headers = {"x-api-key": api_key}
+    else:
+        data = None if payload is None else json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json", "x-api-key": api_key}
     request = Request(
         BASE_URL + path,
         data=data,
         method=method,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
-    with OPENER.open(request, timeout=10) as response:
+    use_opener = opener or OPENER
+    with use_opener.open(request, timeout=10) as response:
         return json.loads(response.read().decode())
 
 
@@ -117,8 +143,19 @@ def main() -> None:
 
     assert "ログインしてください" in fetch("/i/BBS")
 
-    post("/auth/login", {"Username": f"smoke-{suffix}", "password": "password123"})
-    assert f"Hello, smoke-{suffix}!" in fetch("/")
+    smoke_user = f"smoke-{suffix}"
+    smoke_sub = f"local-{smoke_user}"
+    post("/auth/login", {"Username": smoke_user, "password": "password123"})
+    assert f"Hello, {smoke_user}!" in fetch("/")
+    home_api = get_json("/")
+    token_payload = json.loads(home_api["message"])
+    assert token_payload["sub"]
+    try:
+        get_json("/", build_opener(HTTPCookieProcessor(CookieJar())))
+    except HTTPError as exc:
+        assert exc.code == 401
+    else:
+        raise AssertionError("unauthenticated JSON GET / should return 401")
     assert "パスワードを変更する" in fetch("/auth/changepass")
     assert "ログアウトする" in fetch("/auth/logout")
 
@@ -132,6 +169,16 @@ def main() -> None:
     assert "created by local smoke test" in thread_html
     assert "このスレッドに返信する" in thread_html
     assert_thread_list_layout("BBS", created_path, expect_preview=False)
+    try:
+        api(
+            "GET",
+            f"/bbslogs/{created_path.rsplit('/', 1)[-1]}",
+            opener=GUEST_API_OPENER,
+        )
+    except HTTPError as exc:
+        assert exc.code == 401
+    else:
+        raise AssertionError("legacy GET /bbslogs without session must return 401")
     assert post(f"{created_path}/like", {"type": "good", "next": "/i/BBS"}) == "/i/BBS"
 
     assert f'<span class="bg-warning">Smoke</span> {suffix}' in fetch("/i/BBS?q=Smoke&sort=BEST")
@@ -153,6 +200,9 @@ def main() -> None:
     assert "<summary>ログを編集</summary>" not in thread_html
     assert "<summary>ログを削除</summary>" not in thread_html
     assert 'class="modal-shell" hidden' in thread_html
+    guest_thread = fetch_guest(created_path)
+    assert "smoke response" not in guest_thread
+    assert "返信一覧はログイン後" in guest_thread
 
     assert (
         post(f"{created_path}/logs/{log_id}/responses", {"content": "child smoke response"})
@@ -235,6 +285,7 @@ def main() -> None:
     data_html = fetch(data_path)
     assert "ダウンロード" in data_html
     assert "DATA/sample.phz" in data_html
+    assert "/media/DATA/sample.phz" in data_html
     assert_thread_list_layout("DATA", data_path, expect_preview=True)
 
     api_thread = api(
@@ -242,8 +293,8 @@ def main() -> None:
         "/threads/DATA",
         {
             "submition": {
-                "user_name": "api-smoke",
-                "user_id": "api-smoke",
+                "user_name": smoke_user,
+                "user_id": smoke_sub,
                 "title": f"API {suffix}",
                 "content": "created through legacy JSON API",
                 "filedata": ["DATA/api.phn"],
@@ -266,8 +317,8 @@ def main() -> None:
         f"/bbslogs/{api_thread_id}",
         {
             "submition": {
-                "user_name": "api-smoke",
-                "user_id": "api-smoke",
+                "user_name": smoke_user,
+                "user_id": smoke_sub,
                 "content": "api log",
             }
         },
@@ -281,8 +332,8 @@ def main() -> None:
         f"/bbslogs/{api_thread_id}/{api_log['log_id']}",
         {
             "submition": {
-                "user_name": "api-smoke",
-                "user_id": "api-smoke",
+                "user_name": smoke_user,
+                "user_id": smoke_sub,
                 "content": "api child",
             }
         },
@@ -303,12 +354,12 @@ def main() -> None:
     assert api(
         "POST",
         "/like",
-        {"post_id": api_thread_id, "type": "bad", "user_id": "api-smoke"},
+        {"post_id": api_thread_id, "type": "bad", "user_id": smoke_sub},
     )["result"]
     assert api(
         "DELETE",
         "/like",
-        {"post_id": api_thread_id, "type": "bad", "user_id": "api-smoke"},
+        {"post_id": api_thread_id, "type": "bad", "user_id": smoke_sub},
     )["result"]
     assert api("DELETE", f"/bbslogs/{api_thread_id}/{api_log['log_id']}")["result"]
     assert api("DELETE", f"/threads/DATA/{api_thread_id}")["result"]

@@ -693,3 +693,9 @@ Docker Compose 起動後に、ブラウザまたはHTTPテストだけで以下�
 15. ユーザー移行用属性が不足している。旧 `UserSchema` は `v1_id`, `v1_name`, `v1_password` を持つが、現実装の `UserProfile` / `UserRecord` は主に `v1_password` だけで、v1ユーザー情報の保持範囲が旧仕様より狭い。
 
 上記残件は、画面見た目だけでなく旧サービスの操作結果、保存データ、API互換、添付ファイルの扱いに直結するため、個別に旧実装を参照して修正し、対応する `scripts/smoke_local.py` の確認項目を追加すること。
+
+補足として、旧互換の `GET /`（`message` にトークン相当の情報を載せる）は、ブラウザ向け HTML の `GET /` と衝突しないよう、`Accept` の先頭メディアタイプが `application/json` のときだけ JSON を返し、未認証なら 401 とする。スレッド詳細の返信一覧は、旧画面のログイン時のみ取得に合わせ、未ログインの画面では返信一覧を出さない。
+
+**実装進捗（2026-05-05 追記）**: 旧互換 API は `LEGACY_X_API_KEY`（既定 `local-x-api-key`）と `x-api-key` ヘッダの一致を必須とし、添付は `media/` 下へ `IMAGE/`・`DATA/` キーで保存（Data URL は正規化）、PHZ zip 検証と `thumb.png` 抽出、PHN UTF-8 検証、ローカル Cookie の `access_exp`/`refresh_exp` とレスポンス後の擬似トークン更新、スレッド詳細の `IMAGE` カルーセル（矢印・サムネ・スワイプ）、`DATA` の黄色枠ダウンロードブロック、`WIKI`/`IMAGE`/`DATA` スレッドフォームの EasyMDE、`IMAGE` 選択時の canvas による JPEG 化、`markdown`+`bleach` によるスレッド/ログ Markdown、サーバーフォーム失敗時の `Server-side Error` 複数行 `.form-error`、返信ツリー用 `responses_by_log` の全親キー対応を追加した。本番 S3 保存と本物の Cognito refresh は引き続きローカル代替の範囲である。
+
+**実装進捗（2026-05-06 追記）**: `GET /bbslogs/...` 系の旧互換 API はブラウザ同様にセッション Cookie 必須とした。`refresh_exp` が切れた Cookie は未ログイン扱いとし、ミドルウェアで認証 Cookie を削除する。Cerberus 風 `errors` に加え `message` フィールド（`Server-side Error` 先頭の複数行）を返す。環境変数 `ASSET_S3_BUCKET` 等が設定されていれば boto3 で S3 にオブジェクト保存し、`ASSET_PUBLIC_BASE_URL` で配信 URL を組み立てる（未設定時は従来どおり `/media/`）。`WIKI`/`IMAGE`/`DATA` のログ投稿・返信・編集テキストエリアにも EasyMDE を付与した。本物の Cognito JWT 検証・refresh は本番接続時に差し替える前提である。

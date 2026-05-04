@@ -72,3 +72,5 @@ class UserProfile:
     email_verified: bool
     version: str = "2"
     v1_password: str | None = None
+    v1_id: str | None = None
+    v1_name: str | None = None
