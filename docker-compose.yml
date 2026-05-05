@@ -1,4 +1,56 @@
 services:
+  dynamodb:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    working_dir: /tmp
+    command: ["sh", "-c", "uv run --with 'moto[server]>=5.1.22' moto_server -H 0.0.0.0 -p 8000"]
+    environment:
+      AWS_REGION: ap-northeast-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      UV_LINK_MODE: copy
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/moto-api/', timeout=2).read()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+    volumes:
+      - uv-cache:/root/.cache/uv
+
+  s3:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    working_dir: /tmp
+    command: ["sh", "-c", "uv run --with 'moto[server]>=5.1.22' moto_server -H 0.0.0.0 -p 8000"]
+    environment:
+      AWS_REGION: ap-northeast-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      UV_LINK_MODE: copy
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/moto-api/', timeout=2).read()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+    volumes:
+      - uv-cache:/root/.cache/uv
+
   app:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
     working_dir: /app
@@ -9,13 +61,50 @@ services:
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
       DDB_TABLE_NAME: algodoo-main-local
-      DDB_ENDPOINT_URL: http://127.0.0.1:8001
+      DDB_ENDPOINT_URL: http://dynamodb:8000
+      ASSET_S3_BUCKET: algodoo-assets-local
+      ASSET_S3_ENDPOINT_URL: http://s3:8000
+      ASSET_PUBLIC_BASE_URL: http://localhost:8002/algodoo-assets-local
+      ASSET_S3_PUBLIC_ACL: "true"
       SEED_DEMO_DATA: "true"
       LEGACY_X_API_KEY: local-x-api-key
       UV_LINK_MODE: copy
     ports:
       - "8080:8000"
-      - "8001:8001"
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/healthz', timeout=2).read()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+    volumes:
+      - .:/app
+      - uv-cache:/root/.cache/uv
+
+  integration:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    profiles: ["test"]
+    working_dir: /app
+    command: ["sh", "/app/scripts/integration-local.sh"]
+    environment:
+      BASE_URL: http://app:8000
+      S3_INTERNAL_BASE_URL: http://s3:8000/algodoo-assets-local
+      LEGACY_X_API_KEY: local-x-api-key
+      UV_LINK_MODE: copy
+    depends_on:
+      app:
+        condition: service_healthy
     volumes:
       - .:/app
       - uv-cache:/root/.cache/uv

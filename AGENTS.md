@@ -32,10 +32,10 @@ Open:
 http://localhost:8080
 ```
 
-Run the local integration smoke test:
+Run the local integration test:
 
 ```bash
-docker compose exec app python /app/scripts/smoke_local.py
+docker compose --profile test up --abort-on-container-exit --exit-code-from integration
 ```
 
 Syntax check without writing bytecode:
@@ -49,7 +49,7 @@ python3 -B -c "import ast, pathlib; [ast.parse(p.read_text()) for p in pathlib.P
 - `apps/web`: FastAPI app, HTML views, and JSON API routes
 - `packages/domain`: domain dataclasses and enums
 - `packages/data`: DynamoDB single-table models and repository functions
-- `scripts`: local dev and smoke test scripts
+- `scripts`: local dev and integration test scripts
 
 ## Development Rules
 
@@ -57,7 +57,7 @@ python3 -B -c "import ast, pathlib; [ast.parse(p.read_text()) for p in pathlib.P
 - Treat `SPEC.md` as the acceptance criteria. Do not replace legacy UI or API behavior with a newly invented product shape unless the spec is updated from the legacy repositories first.
 - Keep the main screen as a usable application screen.
 - Do not add migration notes, schema descriptions, access pattern docs, or architecture explanations to the user-facing app UI.
-- If a feature changes UI behavior, update `scripts/smoke_local.py` to cover the expected flow.
+- If a feature changes UI behavior, update `scripts/integration_local.py` to cover the expected flow.
 - Keep data access behind `packages/data/src/algodoo_data/repository.py`.
 - Do not bypass `ddb_single` for normal DynamoDB model operations.
 - Do not vendor or commit `DynamoDB-SingleTable`; keep it as the separate dependency declared in `packages/data/pyproject.toml`.

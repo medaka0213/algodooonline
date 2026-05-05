@@ -19,6 +19,9 @@ class WebSettings:
     asset_s3_bucket: str = field(
         default_factory=lambda: (os.getenv("ASSET_S3_BUCKET") or "").strip(),
     )
+    asset_s3_endpoint_url: str = field(
+        default_factory=lambda: (os.getenv("ASSET_S3_ENDPOINT_URL") or "").strip(),
+    )
     asset_s3_prefix: str = field(
         default_factory=lambda: (os.getenv("ASSET_S3_PREFIX") or "").strip().strip("/")
     )
@@ -33,4 +36,3 @@ class WebSettings:
 @lru_cache
 def get_settings() -> WebSettings:
     return WebSettings()
-

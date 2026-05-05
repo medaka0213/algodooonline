@@ -37,34 +37,15 @@ jobs:
           if '.venv' not in p.parts and '__pycache__' not in p.parts and 'vendor' not in p.parts];
           print('syntax ok')"
 
-  test:
-    name: Docker Compose Smoke Test
+  integration:
+    name: Docker Compose Integration Test
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Start local integration stack
-        run: docker compose up -d
-
-      - name: Wait for app health
-        run: |
-          for _ in $(seq 1 60); do
-            if docker compose exec -T app python - >/dev/null 2>&1 <<'PY'
-          from urllib.request import urlopen
-
-          urlopen("http://127.0.0.1:8000/healthz", timeout=2).read()
-          PY
-            then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker compose logs app
-          exit 1
-
-      - name: Run local smoke test
-        run: docker compose exec -T app python /app/scripts/smoke_local.py
+      - name: Run local integration test
+        run: docker compose --profile test up --abort-on-container-exit --exit-code-from integration
 
       - name: Stop local integration stack
         if: always()

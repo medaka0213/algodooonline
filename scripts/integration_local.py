@@ -1,15 +1,25 @@
+import base64
+import io
 import json
 import os
 import time
+import zipfile
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+S3_INTERNAL_BASE_URL = os.environ.get("S3_INTERNAL_BASE_URL", "").rstrip("/")
 OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
 GUEST_API_OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
+
+MIN_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 class ThreadLinkParser(HTMLParser):
@@ -36,6 +46,39 @@ def fetch_guest(path: str) -> str:
     guest = build_opener(HTTPCookieProcessor(CookieJar()))
     with guest.open(BASE_URL + path, timeout=10) as response:
         return response.read().decode()
+
+
+def assert_s3_object_url_rendered(html: str, storage_prefix: str) -> None:
+    public_prefix = "http://localhost:8002/algodoo-assets-local/"
+    marker = f"{public_prefix}{storage_prefix}"
+    assert marker in html
+    if not S3_INTERNAL_BASE_URL:
+        return
+    start = html.index(marker)
+    candidate_ends = [
+        html.find('"', start),
+        html.find("'", start),
+        html.find("<", start),
+    ]
+    valid_ends = [pos for pos in candidate_ends if pos > start]
+    if not valid_ends:
+        raise AssertionError(f"could not find end delimiter for S3 URL at offset {start}")
+    end = min(valid_ends)
+    public_url = html[start:end]
+    object_path = public_url.removeprefix(public_prefix)
+    with OPENER.open(f"{S3_INTERNAL_BASE_URL}/{object_path}", timeout=10) as response:
+        assert response.status == 200
+        assert response.read()
+
+
+def phz_data_url() -> str:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("scene.phn", "# integration scene\n")
+        zf.writestr("checksums.txt", "sha256 placeholder\n")
+        zf.writestr("thumb.png", MIN_PNG)
+    encoded = base64.b64encode(buf.getvalue()).decode()
+    return f"data:application/zip;base64,{encoded}"
 
 
 def get_json(path: str, opener=OPENER) -> dict:
@@ -143,10 +186,10 @@ def main() -> None:
 
     assert "ログインしてください" in fetch("/i/BBS")
 
-    smoke_user = f"smoke-{suffix}"
-    smoke_sub = f"local-{smoke_user}"
-    post("/auth/login", {"Username": smoke_user, "password": "password123"})
-    assert f"Hello, {smoke_user}!" in fetch("/")
+    integration_user = f"integration-{suffix}"
+    integration_sub = f"local-{integration_user}"
+    post("/auth/login", {"Username": integration_user, "password": "password123"})
+    assert f"Hello, {integration_user}!" in fetch("/")
     home_api = get_json("/")
     token_payload = json.loads(home_api["message"])
     assert token_payload["sub"]
@@ -161,12 +204,16 @@ def main() -> None:
 
     created_path = post(
         "/i/BBS/threads",
-        {"title": f"Smoke {suffix}", "content": "created by local smoke test", "filedata": ""},
+        {
+            "title": f"Integration {suffix}",
+            "content": "created by local integration test",
+            "filedata": "",
+        },
     )
     assert created_path.startswith("/i/BBS/BBS_")
     thread_html = fetch(created_path)
-    assert f"Smoke {suffix}" in thread_html
-    assert "created by local smoke test" in thread_html
+    assert f"Integration {suffix}" in thread_html
+    assert "created by local integration test" in thread_html
     assert "このスレッドに返信する" in thread_html
     assert_thread_list_layout("BBS", created_path, expect_preview=False)
     try:
@@ -181,7 +228,9 @@ def main() -> None:
         raise AssertionError("legacy GET /bbslogs without session must return 401")
     assert post(f"{created_path}/like", {"type": "good", "next": "/i/BBS"}) == "/i/BBS"
 
-    assert f'<span class="bg-warning">Smoke</span> {suffix}' in fetch("/i/BBS?q=Smoke&sort=BEST")
+    assert f'<span class="bg-warning">Integration</span> {suffix}' in fetch(
+        "/i/BBS?q=Integration&sort=BEST"
+    )
 
     assert post(
         f"{created_path}/edit",
@@ -189,11 +238,11 @@ def main() -> None:
     ) == created_path
     assert "編集済み" in fetch(created_path)
 
-    assert post(f"{created_path}/logs", {"content": "smoke response"}) == created_path
+    assert post(f"{created_path}/logs", {"content": "integration response"}) == created_path
     logs = api("GET", f"/bbslogs/{created_path.rsplit('/', 1)[-1]}")["submitions"]
-    log_id = next(item["log_id"] for item in logs if item["content"] == "smoke response")
+    log_id = next(item["log_id"] for item in logs if item["content"] == "integration response")
     thread_html = fetch(created_path)
-    assert "smoke response" in thread_html
+    assert "integration response" in thread_html
     assert "log-reply-toggle" in thread_html
     assert "modal-log-preview" in thread_html
     assert 'data-modal-close aria-label="閉じる"' in thread_html
@@ -201,16 +250,16 @@ def main() -> None:
     assert "<summary>ログを削除</summary>" not in thread_html
     assert 'class="modal-shell" hidden' in thread_html
     guest_thread = fetch_guest(created_path)
-    assert "smoke response" not in guest_thread
+    assert "integration response" not in guest_thread
     assert "返信一覧はログイン後" in guest_thread
 
     assert (
-        post(f"{created_path}/logs/{log_id}/responses", {"content": "child smoke response"})
+        post(f"{created_path}/logs/{log_id}/responses", {"content": "child integration response"})
         == created_path
     )
     logs = api("GET", f"/bbslogs/{created_path.rsplit('/', 1)[-1]}")["submitions"]
     child_log_id = next(
-        item["log_id"] for item in logs if item["content"] == "child smoke response"
+        item["log_id"] for item in logs if item["content"] == "child integration response"
     )
     thread_html = fetch(created_path)
     assert "1件の返信" in thread_html
@@ -219,28 +268,28 @@ def main() -> None:
     assert (
         post(
             f"{created_path}/logs/{child_log_id}/responses",
-            {"content": "grandchild smoke response"},
+            {"content": "grandchild integration response"},
         )
         == created_path
     )
     logs = api("GET", f"/bbslogs/{created_path.rsplit('/', 1)[-1]}")["submitions"]
-    grandchild = next(item for item in logs if item["content"] == "grandchild smoke response")
+    grandchild = next(item for item in logs if item["content"] == "grandchild integration response")
     assert grandchild["response_to"] == child_log_id
     thread_html = fetch(created_path)
-    assert "grandchild smoke response" in thread_html
+    assert "grandchild integration response" in thread_html
     assert f'action="{created_path}/logs/{grandchild["log_id"]}/like"' in thread_html
     assert f'action="{created_path}/logs/{grandchild["log_id"]}/responses"' in thread_html
     assert "<summary>ログを編集</summary>" not in thread_html
     assert "<summary>ログを削除</summary>" not in thread_html
 
     assert (
-        post(f"{created_path}/logs/{log_id}/edit", {"content": "edited smoke response"})
+        post(f"{created_path}/logs/{log_id}/edit", {"content": "edited integration response"})
         == created_path
     )
-    assert "edited smoke response" in fetch(created_path)
+    assert "edited integration response" in fetch(created_path)
 
     assert post(f"{created_path}/logs/{log_id}/delete", {"deletepass": "wrong"}) == created_path
-    assert "edited smoke response" in fetch(created_path)
+    assert "edited integration response" in fetch(created_path)
     assert post(f"{created_path}/logs/{log_id}/delete", {"deletepass": "delete"}) == created_path
     assert "この返信は削除されました" in fetch(created_path)
 
@@ -259,10 +308,14 @@ def main() -> None:
 
     wiki_path = post(
         "/i/WIKI/threads",
-        {"title": f"Wiki {suffix}", "content": "## Markdown smoke\n\n**bold**", "filedata": ""},
+        {
+            "title": f"Wiki {suffix}",
+            "content": "## Markdown integration\n\n**bold**",
+            "filedata": "",
+        },
     )
     assert_thread_list_layout("WIKI", wiki_path, expect_preview=False)
-    assert "<h2>Markdown smoke</h2>" in fetch(wiki_path)
+    assert "<h2>Markdown integration</h2>" in fetch(wiki_path)
 
     image_data_url = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w=="
     image_path = post(
@@ -272,6 +325,7 @@ def main() -> None:
     image_html = fetch(image_path)
     assert "uploaded image" in image_html
     assert "slide-image" in image_html
+    assert_s3_object_url_rendered(image_html, "IMAGE/")
     assert_thread_list_layout("IMAGE", image_path, expect_preview=True)
 
     data_path = post(
@@ -279,13 +333,13 @@ def main() -> None:
         {
             "title": f"Data {suffix}",
             "content": "data content",
-            "filedata": "DATA/sample.phz\nDATA/sample_thumb.png",
+            "filedata": phz_data_url(),
         },
     )
     data_html = fetch(data_path)
     assert "ダウンロード" in data_html
-    assert "DATA/sample.phz" in data_html
-    assert "/media/DATA/sample.phz" in data_html
+    assert ".phz" in data_html
+    assert_s3_object_url_rendered(data_html, "DATA/")
     assert_thread_list_layout("DATA", data_path, expect_preview=True)
 
     api_thread = api(
@@ -293,8 +347,8 @@ def main() -> None:
         "/threads/DATA",
         {
             "submition": {
-                "user_name": smoke_user,
-                "user_id": smoke_sub,
+                "user_name": integration_user,
+                "user_id": integration_sub,
                 "title": f"API {suffix}",
                 "content": "created through legacy JSON API",
                 "filedata": ["DATA/api.phn"],
@@ -317,8 +371,8 @@ def main() -> None:
         f"/bbslogs/{api_thread_id}",
         {
             "submition": {
-                "user_name": smoke_user,
-                "user_id": smoke_sub,
+                "user_name": integration_user,
+                "user_id": integration_sub,
                 "content": "api log",
             }
         },
@@ -332,8 +386,8 @@ def main() -> None:
         f"/bbslogs/{api_thread_id}/{api_log['log_id']}",
         {
             "submition": {
-                "user_name": smoke_user,
-                "user_id": smoke_sub,
+                "user_name": integration_user,
+                "user_id": integration_sub,
                 "content": "api child",
             }
         },
@@ -354,12 +408,12 @@ def main() -> None:
     assert api(
         "POST",
         "/like",
-        {"post_id": api_thread_id, "type": "bad", "user_id": smoke_sub},
+        {"post_id": api_thread_id, "type": "bad", "user_id": integration_sub},
     )["result"]
     assert api(
         "DELETE",
         "/like",
-        {"post_id": api_thread_id, "type": "bad", "user_id": smoke_sub},
+        {"post_id": api_thread_id, "type": "bad", "user_id": integration_sub},
     )["result"]
     assert api("DELETE", f"/bbslogs/{api_thread_id}/{api_log['log_id']}")["result"]
     assert api("DELETE", f"/threads/DATA/{api_thread_id}")["result"]
@@ -370,7 +424,7 @@ def main() -> None:
     )["isV2"]
     assert api("POST", "/user/update", {"submition": {"idToken": "local-token-api-user"}})["result"]
 
-    print("smoke ok")
+    print("integration ok")
 
 
 if __name__ == "__main__":

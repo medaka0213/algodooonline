@@ -51,7 +51,10 @@ def _persist_file_bytes(storage_key: str, body: bytes, content_type: str) -> str
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(body)
         return None
-    client = boto3.client("s3", region_name=settings.aws_region)
+    client_kwargs = {"region_name": settings.aws_region}
+    if settings.asset_s3_endpoint_url:
+        client_kwargs["endpoint_url"] = settings.asset_s3_endpoint_url
+    client = boto3.client("s3", **client_kwargs)
     key = _s3_object_key(storage_key)
     extra: dict = {
         "Bucket": settings.asset_s3_bucket,
@@ -76,7 +79,7 @@ def normalize_and_persist_filedata(
 ) -> tuple[list[str], str | None]:
     """
     Replace Data URLs with on-disk keys under IMAGE/ or DATA/.
-    Existing IMAGE/… or DATA/… lines are kept (for smoke fixtures and API keys).
+    Existing IMAGE/… or DATA/… lines are kept (for integration fixtures and API keys).
     """
     if route not in (LegacyRoute.IMAGE, LegacyRoute.DATA):
         if any(line.strip() for line in filedata):
