@@ -3,8 +3,11 @@ import time
 import zipfile
 from pathlib import Path
 
+import boto3
 from algodoo_data.config import get_data_settings
 from algodoo_data.repository import init_table, seed_demo_data
+
+from algodoo_web.config import get_settings
 
 _MIN_PNG = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -14,7 +17,7 @@ _MIN_PNG = (
 
 
 def _ensure_static_media_samples() -> None:
-    """Valid PHZ + thumb for local smoke (DATA/sample.phz, DATA/sample_thumb.png)."""
+    """Valid PHZ + thumb for local integration tests."""
     base = Path(__file__).resolve().parent / "media" / "DATA"
     base.mkdir(parents=True, exist_ok=True)
     sample_phz = base / "sample.phz"
@@ -34,6 +37,33 @@ def _ensure_static_media_samples() -> None:
         api_phn.write_text("# api phn sample\n", encoding="utf-8")
 
 
+def _ensure_local_s3_bucket() -> None:
+    settings = get_settings()
+    if not settings.asset_s3_bucket or not settings.asset_s3_endpoint_url:
+        return
+    client = boto3.client(
+        "s3",
+        endpoint_url=settings.asset_s3_endpoint_url,
+        region_name=settings.aws_region,
+    )
+    last_error: Exception | None = None
+    for _ in range(30):
+        try:
+            client.create_bucket(
+                Bucket=settings.asset_s3_bucket,
+                CreateBucketConfiguration={"LocationConstraint": settings.aws_region},
+            )
+            return
+        except client.exceptions.BucketAlreadyOwnedByYou:
+            return
+        except client.exceptions.BucketAlreadyExists:
+            return
+        except Exception as exc:  # noqa: BLE001 - local dependency may not be ready yet
+            last_error = exc
+            time.sleep(1)
+    raise RuntimeError("failed to initialize local S3 bucket") from last_error
+
+
 def bootstrap_data() -> None:
     settings = get_data_settings()
     last_error: Exception | None = None
@@ -48,4 +78,5 @@ def bootstrap_data() -> None:
         raise RuntimeError("failed to initialize DynamoDB table") from last_error
     if settings.seed_demo_data:
         seed_demo_data()
+    _ensure_local_s3_bucket()
     _ensure_static_media_samples()
