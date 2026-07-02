@@ -124,6 +124,12 @@ uv run --group e2e playwright install --with-deps chromium
 BASE_URL=http://localhost:8080 uv run --group e2e pytest tests/e2e
 ```
 
+実行後、`test-results/report.html` をブラウザで直接開くとテスト結果（成否・所要時間・失敗時のトレースバック）を一覧で確認できます（`docker compose --profile e2e` 実行時もリポジトリ直下にバインドマウントされるので、コンテナが終了した後にホスト側でそのまま開けます）。失敗したテストのスクリーンショット・動画・trace は同じ `test-results/<テスト名>/` 配下に出力され、trace は次のコマンドでブラウザ操作を録画のように再生しながら確認できます。
+
+```bash
+uv run --group e2e playwright show-trace test-results/<テスト名>/trace.zip
+```
+
 ## 参照元
 
 - APP: `../Algon2-APP`

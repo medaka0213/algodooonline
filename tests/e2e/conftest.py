@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import pathlib
 import secrets
 
 import pytest
@@ -14,6 +15,20 @@ _counter = itertools.count()
 # (see docker-compose.yml), so a purely sequential id ("e2e0", "e2e1", ...)
 # can collide with leftover data from an earlier run against the same store.
 _run_id = secrets.token_hex(3)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    # pytest.ini's --html=test-results/report.html needs the directory to
+    # exist right before pytest-html writes it. Creating it in
+    # pytest_configure isn't enough: pytest-playwright wipes its --output
+    # dir (also "test-results" by default) at session start to drop stale
+    # artifacts from a previous run, and recreates it only when a
+    # screenshot/video/trace is actually written for a failing test — so an
+    # all-passing run would otherwise leave nothing for pytest-html to write
+    # into. `tryfirst=True` runs this before pytest-html's own
+    # pytest_sessionfinish, which is where it actually writes the report.
+    pathlib.Path("test-results").mkdir(parents=True, exist_ok=True)
 
 
 @pytest.fixture(scope="session")

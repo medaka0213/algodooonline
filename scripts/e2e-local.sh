@@ -10,4 +10,9 @@ fi
 
 uv sync --all-packages --group e2e
 uv run --group e2e playwright install --with-deps chromium
+
+# pytest-html's --html target directory must exist beforehand; it doesn't
+# create parent dirs itself (unlike Playwright's own screenshot/video dirs).
+mkdir -p test-results
+
 exec uv run --group e2e pytest tests/e2e "$@"
