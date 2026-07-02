@@ -444,6 +444,7 @@ def create_user(
     email: str,
     sub: str | None = None,
     email_verified: bool = True,
+    version: str = "2",
     v1_password: str | None = None,
     v1_id: str | None = None,
     v1_name: str | None = None,
@@ -453,7 +454,7 @@ def create_user(
         sub=sub or f"local-{username}",
         email=email,
         email_verified=email_verified,
-        version="2",
+        version=version,
         v1_password=v1_password,
         v1_id=v1_id,
         v1_name=v1_name,
@@ -479,11 +480,24 @@ def signin_user(username: str, password: str) -> dict[str, bool]:
     return {"result": True, "isV2": True, "isV1": False}
 
 
-def update_user_from_token(id_token: str) -> UserProfile:
-    username = id_token.removeprefix("local-token-") or "anonymous"
-    user = get_user(username)
-    if user is None:
-        user = create_user(username=username, email=f"{username}@local.invalid")
+def upsert_user_from_claims(claims: dict) -> UserProfile:
+    """Merge verified id-token claims into the user record (old POST /user/update)."""
+    username = str(claims.get("name") or claims.get("cognito:username") or "").strip()
+    username = username or "anonymous"
+    existing = get_user(username)
+    user = UserProfile(
+        username=username,
+        sub=str(claims.get("sub") or (existing.sub if existing else f"local-{username}")),
+        email=str(claims.get("email") or (existing.email if existing else "")),
+        email_verified=bool(
+            claims.get("email_verified", existing.email_verified if existing else True)
+        ),
+        version="2",
+        v1_password=existing.v1_password if existing else None,
+        v1_id=existing.v1_id if existing else None,
+        v1_name=existing.v1_name if existing else None,
+    )
+    query().model(user_to_record(user)).update()
     return user
 
 

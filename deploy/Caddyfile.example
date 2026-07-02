@@ -1,0 +1,13 @@
+# Host-level reverse proxy in front of the compose stack.
+# The app listens on 127.0.0.1:8080, MinIO on 127.0.0.1:9000 (both loopback-only).
+# Caddy obtains TLS certificates automatically.
+
+example.com {
+	reverse_proxy 127.0.0.1:8080
+}
+
+# Public asset delivery straight from MinIO (bucket has anonymous download policy).
+# ASSET_PUBLIC_BASE_URL should be https://assets.example.com/<bucket-name>.
+assets.example.com {
+	reverse_proxy 127.0.0.1:9000
+}

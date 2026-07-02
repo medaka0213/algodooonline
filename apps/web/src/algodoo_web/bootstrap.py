@@ -1,12 +1,12 @@
 import io
 import time
 import zipfile
-from pathlib import Path
 
 import boto3
 from algodoo_data.config import get_data_settings
 from algodoo_data.repository import init_table, seed_demo_data
 
+from algodoo_web.asset_store import asset_s3_client_kwargs, media_root
 from algodoo_web.config import get_settings
 
 _MIN_PNG = (
@@ -18,7 +18,7 @@ _MIN_PNG = (
 
 def _ensure_static_media_samples() -> None:
     """Valid PHZ + thumb for local integration tests."""
-    base = Path(__file__).resolve().parent / "media" / "DATA"
+    base = media_root() / "DATA"
     base.mkdir(parents=True, exist_ok=True)
     sample_phz = base / "sample.phz"
     if not sample_phz.exists():
@@ -39,13 +39,11 @@ def _ensure_static_media_samples() -> None:
 
 def _ensure_local_s3_bucket() -> None:
     settings = get_settings()
+    if not settings.asset_s3_auto_create:
+        return
     if not settings.asset_s3_bucket or not settings.asset_s3_endpoint_url:
         return
-    client = boto3.client(
-        "s3",
-        endpoint_url=settings.asset_s3_endpoint_url,
-        region_name=settings.aws_region,
-    )
+    client = boto3.client("s3", **asset_s3_client_kwargs())
     last_error: Exception | None = None
     for _ in range(30):
         try:
@@ -76,7 +74,7 @@ def bootstrap_data() -> None:
             time.sleep(1)
     else:
         raise RuntimeError("failed to initialize DynamoDB table") from last_error
+    _ensure_local_s3_bucket()
     if settings.seed_demo_data:
         seed_demo_data()
-    _ensure_local_s3_bucket()
-    _ensure_static_media_samples()
+        _ensure_static_media_samples()
