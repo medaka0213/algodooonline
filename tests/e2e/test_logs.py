@@ -5,14 +5,16 @@ from __future__ import annotations
 from auth import login
 from board import (
     create_thread,
-    delete_log,
     edit_log,
     log_item_by_text,
     log_menu_dropdown,
     log_replies_disclosure,
     log_reply_toggle,
+    open_log_delete_modal,
     reply_to_log,
     reply_to_thread,
+    submit_deletepass,
+    submit_deletepass_blocked,
 )
 from playwright.sync_api import Page, expect
 
@@ -80,12 +82,14 @@ def test_log_edit_and_delete_require_ownership_and_confirmation(
         "編集済み"
     )
 
-    delete_log(page, log_item, "wrong")
-    page.wait_for_url(f"**{thread_path}")
-    log_item = log_item_by_text(page, f"edited {unique_id}")
-    expect(log_item).to_have_count(1)
+    # Wrong confirmation text never reaches the server: the pattern check
+    # blocks the submit with a visible validation message.
+    modal = open_log_delete_modal(log_item)
+    submit_deletepass_blocked(modal, "wrong")
+    assert thread_path in page.url
+    expect(log_item_by_text(page, f"edited {unique_id}")).to_have_count(1)
 
-    delete_log(page, log_item, "delete")
+    submit_deletepass(page, modal, "delete")
     page.wait_for_url(f"**{thread_path}")
     expect(page.get_by_text("この返信は削除されました")).to_have_count(1)
     expect(page.get_by_text(f"edited {unique_id}")).to_have_count(0)

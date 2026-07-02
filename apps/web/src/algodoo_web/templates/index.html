@@ -586,7 +586,7 @@
                 <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>ログを削除する</h2>
                 <p class="text-danger">投稿を削除するには、「削除」または「delete」と入力してください</p>
                 <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/logs/{{ log.log_id }}/delete">
-                  <input class="form-control" name="deletepass" required />
+                  <input class="form-control" name="deletepass" required pattern="削除|delete" title="「削除」または「delete」と入力してください" />
                   <button class="btn btn-primary" type="submit">Submit</button>
                 </form>
               </div>
@@ -750,16 +750,19 @@
         <li class="active">{{ active_route.value }}</li>
         {% endif %}
       </ol>
-      {% if form_error %}
+      {% if form_error and not open_modal %}
       <p class="form-error">{{ form_error }}</p>
       {% endif %}
 
       {% if not selected_thread %}
-      <details class="modal-toggle">
+      <details class="modal-toggle" {% if open_modal == "new-thread" %}open{% endif %}>
         <summary>スレッドを投稿する</summary>
         <div class="modal-body">
           {% if current_user %}
           <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>スレッドを投稿する</h2>
+          {% if form_error and open_modal == "new-thread" %}
+          <p class="form-error">{{ form_error }}</p>
+          {% endif %}
           {% include "thread_form.html" %}
           {% else %}
           <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>スレッドを投稿する</h2>
@@ -887,9 +890,12 @@
         </div>
 
         {% if current_user and current_user.sub == selected_thread.user_id %}
-        <div id="edit-thread" class="modal-shell" hidden>
+        <div id="edit-thread" class="modal-shell" {% if open_modal != "edit-thread" %}hidden{% endif %}>
           <div class="modal-body">
             <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>投稿を編集する</h2>
+            {% if form_error and open_modal == "edit-thread" %}
+            <p class="form-error">{{ form_error }}</p>
+            {% endif %}
             {% set form_action = "/i/" ~ active_route.value ~ "/" ~ selected_thread.thread_id ~ "/edit" %}
             {% set form_thread = selected_thread %}
             {% include "thread_form.html" %}
@@ -900,7 +906,7 @@
             <h2><button class="modal-close" type="button" data-modal-close aria-label="閉じる">&times;</button>投稿を削除する</h2>
             <p class="text-danger">投稿を削除するには、「削除」または「delete」と入力してください</p>
             <form method="post" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}/delete">
-              <input class="form-control" name="deletepass" required />
+              <input class="form-control" name="deletepass" required pattern="削除|delete" title="「削除」または「delete」と入力してください" />
               <button class="btn btn-primary" type="submit">Submit</button>
             </form>
           </div>
@@ -944,19 +950,64 @@
 
     <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
     <script>
+      function showFormError(form, message) {
+        var err = form.querySelector(".form-error[data-client-error]");
+        if (!err) {
+          err = document.createElement("p");
+          err.className = "form-error";
+          err.setAttribute("data-client-error", "");
+          form.insertBefore(err, form.firstChild);
+        }
+        err.textContent = message;
+      }
       if (typeof EasyMDE !== "undefined") {
         document.querySelectorAll("textarea.thread-md-editor").forEach(function (el) {
           if (el.dataset.mdInit) return;
           el.dataset.mdInit = "1";
-          new EasyMDE({
+          var mde = new EasyMDE({
             element: el,
             spellChecker: false,
             status: false,
             minHeight: "200px",
             autoDownloadFontAwesome: false,
+            forceSync: true,
           });
+          // EasyMDE hides the textarea, so a `required` textarea can never be
+          // focused by native validation: Chrome blocks the submit silently
+          // ("invalid form control is not focusable"). Validate on submit
+          // instead and show the error inline.
+          el.required = false;
+          var form = el.closest("form");
+          if (form) {
+            form.addEventListener("submit", function (event) {
+              if (!mde.value().trim()) {
+                event.preventDefault();
+                showFormError(form, "content: 本文を入力してください");
+                mde.codemirror.focus();
+              }
+            });
+          }
         });
       }
+      // Whitespace-only input passes native `required`; trim-check plain
+      // thread/log forms too so the server-side error round-trip is avoided.
+      document.querySelectorAll("form").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+          var title = form.querySelector("input[name=title]");
+          if (title && title.value && !title.value.trim()) {
+            event.preventDefault();
+            showFormError(form, "title: タイトルを入力してください");
+            title.focus();
+            return;
+          }
+          var content = form.querySelector("textarea[name=content]:not(.thread-md-editor)");
+          if (content && content.value && !content.value.trim()) {
+            event.preventDefault();
+            showFormError(form, "content: 本文を入力してください");
+            content.focus();
+          }
+        });
+      });
       document.querySelectorAll("[data-open-modal]").forEach(function (button) {
         button.addEventListener("click", function (event) {
           event.preventDefault();
