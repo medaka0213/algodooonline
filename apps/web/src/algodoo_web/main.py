@@ -100,6 +100,7 @@ def _accept_prefers_json(request: Request) -> bool:
     first = accept.split(",", maxsplit=1)[0].strip().split(";", maxsplit=1)[0].strip().lower()
     return first == "application/json"
 
+
 def _route_or_404(route: str) -> LegacyRoute:
     normalized = route.upper()
     if normalized == "WIKI":
@@ -431,17 +432,13 @@ def _board_context(
         "responses_by_log": responses_by_log,
         "like_summary": get_like_summary(selected_thread.thread_id) if selected_thread else {},
         "log_like_summary": {log.log_id: get_like_summary(log.log_id) for log in logs},
-        "thread_own_likes": (
-            _build_own_likes(threads, current_user)
-        ),
+        "thread_own_likes": (_build_own_likes(threads, current_user)),
         "selected_thread_own_like": (
             get_own_like(selected_thread.thread_id, current_user["sub"])
             if selected_thread and current_user
             else {}
         ),
-        "log_own_likes": (
-            _build_own_likes(logs, current_user)
-        ),
+        "log_own_likes": (_build_own_likes(logs, current_user)),
         "form_error": form_error,
         "image_slide_urls": (
             [media_public_url(f) for f in (selected_thread.filedata or []) if _is_image(f)]
@@ -475,6 +472,15 @@ def route_page(request: Request, route: str) -> HTMLResponse:
         name="index.html",
         context=_board_context(request, legacy_route),
     )
+
+
+# Registered before thread_page so a reload after a POST /i/{route}/threads
+# validation error lands back on the board instead of a 404 ("threads" would
+# otherwise be parsed as a thread_id).
+@app.get("/i/{route}/threads", response_class=HTMLResponse)
+def thread_post_url_redirect(route: str) -> RedirectResponse:
+    legacy_route = _route_or_404(route)
+    return RedirectResponse(url=f"/i/{legacy_route.value}", status_code=303)
 
 
 @app.get("/i/{route}/{thread_id}", response_class=HTMLResponse)
@@ -701,6 +707,37 @@ async def forgotpass_submit(request: Request):
     return _render(recover=True)
 
 
+def _thread_form_error_response(
+    request: Request,
+    route: LegacyRoute,
+    errors: dict[str, str],
+    form: dict[str, str],
+    open_modal: str,
+    thread_id: str | None = None,
+) -> HTMLResponse:
+    """Re-render the board with the failed modal reopened and the input kept."""
+    ctx = _board_context(
+        request,
+        route,
+        thread_id,
+        form_error=_server_side_error_message(errors),
+    )
+    ctx.update(
+        {
+            "open_modal": open_modal,
+            "form_title": form.get("title", ""),
+            "form_content": form.get("content", ""),
+            "form_filedata": form.get("filedata", ""),
+        }
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context=ctx,
+        status_code=422,
+    )
+
+
 @app.post("/i/{route}/threads", response_model=None)
 async def create_thread_form(request: Request, route: str) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
@@ -710,27 +747,10 @@ async def create_thread_form(request: Request, route: str) -> RedirectResponse |
     content = form.get("content", "").strip()
     raw_files = _filedata_from_form(form.get("filedata", ""))
     if errs := _validate_thread_form_fields(title, content):
-        ctx = _board_context(
-            request,
-            legacy_route,
-            form_error=_server_side_error_message(errs),
-        )
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context=ctx,
-            status_code=422,
-        )
+        return _thread_form_error_response(request, legacy_route, errs, form, "new-thread")
     if err := validate_thread_filedata(legacy_route, raw_files):
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context=_board_context(
-                request,
-                legacy_route,
-                form_error=_server_side_error_message({"filedata": err}),
-            ),
-            status_code=422,
+        return _thread_form_error_response(
+            request, legacy_route, {"filedata": err}, form, "new-thread"
         )
     thread = create_thread(
         route=legacy_route,
@@ -747,15 +767,8 @@ async def create_thread_form(request: Request, route: str) -> RedirectResponse |
     )
     if nerr:
         delete_thread(legacy_route, thread.thread_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context=_board_context(
-                request,
-                legacy_route,
-                form_error=_server_side_error_message({"filedata": nerr}),
-            ),
-            status_code=422,
+        return _thread_form_error_response(
+            request, legacy_route, {"filedata": nerr}, form, "new-thread"
         )
     if keys or raw_files:
         update_thread_details(legacy_route, thread.thread_id, title, content, keys)
@@ -780,28 +793,12 @@ async def edit_thread_form(
     content = form.get("content", "").strip()
     raw_files = _filedata_from_form(form.get("filedata", ""))
     if errs := _validate_thread_form_fields(title, content):
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context=_board_context(
-                request,
-                legacy_route,
-                thread_id,
-                form_error=_server_side_error_message(errs),
-            ),
-            status_code=422,
+        return _thread_form_error_response(
+            request, legacy_route, errs, form, "edit-thread", thread_id
         )
     if err := validate_thread_filedata(legacy_route, raw_files):
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context=_board_context(
-                request,
-                legacy_route,
-                thread_id,
-                form_error=_server_side_error_message({"filedata": err}),
-            ),
-            status_code=422,
+        return _thread_form_error_response(
+            request, legacy_route, {"filedata": err}, form, "edit-thread", thread_id
         )
     keys, nerr = normalize_and_persist_filedata(
         route=legacy_route,
@@ -809,16 +806,8 @@ async def edit_thread_form(
         filedata=raw_files,
     )
     if nerr:
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context=_board_context(
-                request,
-                legacy_route,
-                thread_id,
-                form_error=_server_side_error_message({"filedata": nerr}),
-            ),
-            status_code=422,
+        return _thread_form_error_response(
+            request, legacy_route, {"filedata": nerr}, form, "edit-thread", thread_id
         )
     update_thread_details(
         route=legacy_route,
@@ -1027,6 +1016,14 @@ async def like_log_form(
     if not next_url.startswith("/") or next_url.startswith("//"):
         next_url = f"/i/{legacy_route.value}/{thread_id}"
     return RedirectResponse(url=next_url, status_code=303)
+
+
+# Reloading after a POST to an action URL (/edit, /delete, /logs, /like, ...)
+# replays it as GET; send the user back to the thread page instead of home.
+@app.get("/i/{route}/{thread_id}/{rest:path}", response_class=HTMLResponse)
+def thread_action_url_redirect(route: str, thread_id: str, rest: str) -> RedirectResponse:
+    legacy_route = _route_or_404(route)
+    return RedirectResponse(url=f"/i/{legacy_route.value}/{thread_id}", status_code=303)
 
 
 @app.get("/{path:path}", response_class=HTMLResponse)

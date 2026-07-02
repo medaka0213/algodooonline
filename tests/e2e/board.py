@@ -121,14 +121,32 @@ def edit_thread(
     submit_and_wait(page, modal.get_by_role("button", name="submit", exact=True))
 
 
-def delete_thread(page: Page, deletepass: str) -> None:
+def open_thread_delete_modal(page: Page) -> Locator:
     dropdown = page.locator("article.post-detail details.dropdown")
     dropdown.locator("summary").click()
     dropdown.get_by_role("button", name="投稿を削除").click()
     modal = page.locator("#delete-thread")
     expect(modal.locator(".modal-body")).to_be_visible()
+    return modal
+
+
+def submit_deletepass(page: Page, modal: Locator, deletepass: str) -> None:
     modal.locator('input[name="deletepass"]').fill(deletepass)
     submit_and_wait(page, modal.get_by_role("button", name="Submit", exact=True))
+
+
+def submit_deletepass_blocked(modal: Locator, deletepass: str) -> None:
+    """Wrong confirmation text is blocked client-side (pattern) — no navigation."""
+    field = modal.locator('input[name="deletepass"]')
+    field.fill(deletepass)
+    modal.get_by_role("button", name="Submit", exact=True).click()
+    assert field.evaluate("el => el.validity.patternMismatch") is True
+    expect(modal.locator(".modal-body")).to_be_visible()
+
+
+def delete_thread(page: Page, deletepass: str) -> None:
+    modal = open_thread_delete_modal(page)
+    submit_deletepass(page, modal, deletepass)
 
 
 def reply_to_thread(page: Page, route: str, content: str) -> None:
@@ -204,13 +222,17 @@ def edit_log(page: Page, route: str, log_item: Locator, content: str) -> None:
     submit_and_wait(page, modal.get_by_role("button", name="Submit", exact=True))
 
 
-def delete_log(page: Page, log_item: Locator, deletepass: str) -> None:
+def open_log_delete_modal(log_item: Locator) -> Locator:
     log_menu_dropdown(log_item).locator("summary").click()
     log_menu_dropdown(log_item).get_by_role("button", name="ログを削除").click()
     modal = log_delete_modal(log_item)
     expect(modal.locator(".modal-body")).to_be_visible()
-    modal.locator('input[name="deletepass"]').fill(deletepass)
-    submit_and_wait(page, modal.get_by_role("button", name="Submit", exact=True))
+    return modal
+
+
+def delete_log(page: Page, log_item: Locator, deletepass: str) -> None:
+    modal = open_log_delete_modal(log_item)
+    submit_deletepass(page, modal, deletepass)
 
 
 def like_and_wait(page: Page, like_button: Locator) -> None:

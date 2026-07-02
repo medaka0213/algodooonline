@@ -1,14 +1,18 @@
 {% set target_action = form_action|default("/i/" ~ active_route.value ~ "/threads") %}
 {% set target_thread = form_thread|default(none) %}
+{# After a server-side validation error the submitted values (form_*) win so the user's input survives the round trip. #}
+{% set preset_title = form_title|default(none) %}
+{% set preset_content = form_content|default(none) %}
+{% set preset_filedata = form_filedata|default(none) %}
 <form method="post" action="{{ target_action }}">
   <div class="form-group">
     <label>title
-      <input class="form-control" name="title" value="{{ target_thread.title if target_thread else '' }}" required maxlength="32" />
+      <input class="form-control" name="title" value="{{ preset_title if preset_title is not none else (target_thread.title if target_thread else '') }}" required maxlength="32" />
     </label>
   </div>
   <div class="form-group">
     <label>content
-      <textarea class="form-control{% if active_route.value != 'BBS' %} thread-md-editor{% endif %}" name="content" required maxlength="32000">{{ target_thread.content if target_thread else '' }}</textarea>
+      <textarea class="form-control{% if active_route.value != 'BBS' %} thread-md-editor{% endif %}" name="content" required maxlength="32000">{{ preset_content if preset_content is not none else (target_thread.content if target_thread else '') }}</textarea>
     </label>
   </div>
   {% if active_route.value in ["IMAGE", "DATA"] %}
@@ -29,7 +33,7 @@
   {% endif %}
   <div class="form-group">
     <label>filedata
-      <textarea class="form-control" id="filedata-{{ target_thread.thread_id if target_thread else 'new' }}" name="filedata">{% if target_thread %}{% for file in target_thread.filedata %}{{ file }}
+      <textarea class="form-control" id="filedata-{{ target_thread.thread_id if target_thread else 'new' }}" name="filedata">{% if preset_filedata is not none %}{{ preset_filedata }}{% elif target_thread %}{% for file in target_thread.filedata %}{{ file }}
 {% endfor %}{% endif %}</textarea>
     </label>
   </div>

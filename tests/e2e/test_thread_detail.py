@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from auth import login
-from board import create_thread, delete_thread, edit_thread
+from board import (
+    create_thread,
+    edit_thread,
+    open_thread_delete_modal,
+    submit_deletepass,
+    submit_deletepass_blocked,
+)
 from playwright.sync_api import Page, expect
 
 BBS_CONTENT = "line one\nline two with a very-long-unbreakable-word-" + ("x" * 40)
@@ -105,11 +111,14 @@ def test_thread_delete_requires_confirmation_text(
     title = f"Delete {unique_id}"
     thread_path = create_thread(page, "BBS", title, "will be deleted")
 
-    delete_thread(page, "wrong")
-    page.wait_for_url(f"**{thread_path}")
+    # Wrong confirmation text never reaches the server: the pattern check
+    # blocks the submit with a visible validation message.
+    modal = open_thread_delete_modal(page)
+    submit_deletepass_blocked(modal, "wrong")
+    assert thread_path in page.url
     expect(page.locator("article.post-detail h1")).to_have_text(title)
 
-    delete_thread(page, "削除")
+    submit_deletepass(page, modal, "削除")
     page.wait_for_url("**/i/BBS")
 
     page.goto(f"/i/BBS?q={title}")

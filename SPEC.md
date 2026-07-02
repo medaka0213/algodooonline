@@ -674,6 +674,8 @@ Docker Compose 起動後に、ブラウザまたはHTTPテストだけで以下�
 
 `scripts/integration_local.py` はHTTPレベルの検証であり、実ブラウザでのクリック・入力・EasyMDE・ファイルドロップ・モーダル開閉までは検証しない。上記条件を実ブラウザで確認する自動テストは `tests/e2e`（Playwright/pytest-playwright）に置く。ローカルは `docker compose --profile e2e up --abort-on-container-exit --exit-code-from e2e`、GitHub Actionsも同じプロファイルを実行する。画面仕様を変えた場合は `tests/e2e` も同時に更新する。
 
+**実装進捗（2026-07-02 追記, 全機能QA）**: 全機能のユーザーストーリー50件を `docs/feature-status.csv`（正準ステータス表）に固定し、e2e 59件・integration・migration の全スイートと手動ブラウザ確認で全件検証した。検出したUX不具合3件を修正: (1) EasyMDE がtextareaを隠すため空contentのsubmitがHTML5必須検証の「not focusable」で無反応になっていた — required を外しJSでtrim検証+インラインエラー表示に変更。(2) スレッド投稿/編集のサーバー側検証エラーでURLが `/i/{route}/threads` 等のまま残りリロードで404、モーダルが閉じ入力が消えていた — エラー時はモーダルを開いたまま入力保持で再表示し、action URLへの直接GETは303でボードへ戻す。(3) 削除確認の不正入力が無言でリダイレクトされていた — deletepass に `pattern="削除|delete"` を付与しブラウザ側でブロック。`tests/e2e` の削除確認テストは新挙動に合わせて更新済み。
+
 **実装進捗（2026-07-02 追記, Playwright e2e）**: `tests/e2e` を追加し、`docker compose --profile e2e` と GitHub Actions の `e2e` ジョブから実行する。実装中に実ブラウザ操作で顕在化した既存バグ2件を修正した。(1) `_build_own_likes`（`apps/web/src/algodoo_web/main.py`）がログの自分のLike状態をスレッドIDで誤って引いており、ログにLikeしても `is-liked` 表示に反映されなかった。(2) DATA投稿のファイル選択で `.phz`/`.phn` はOSのMIMEデータベースに未登録のため `File.type` が空になり、サーバー側の `application/zip`/`text/plain` 判定に必ず失敗していた。クライアント側で拡張子から明示的にMIMEを補正するよう `templates/index.html` を修正した。
 
 ## 18. 現実装との差分
