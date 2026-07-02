@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import base64
 import itertools
 import os
 import pathlib
 import secrets
 
 import pytest
+import pytest_html
 from auth import login
 from playwright.sync_api import Page
+from slugify import slugify
 
 _counter = itertools.count()
 # Random per-process, not per-test: the DynamoDB-backed stack the app service
@@ -29,6 +32,52 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     # into. `tryfirst=True` runs this before pytest-html's own
     # pytest_sessionfinish, which is where it actually writes the report.
     pathlib.Path("test-results").mkdir(parents=True, exist_ok=True)
+
+
+def _video_path(item: pytest.Item) -> pathlib.Path | None:
+    # Mirrors pytest-playwright's own artifact naming
+    # (pytest_playwright.output_path / _build_artifact_test_folder) so we can
+    # find the video it just wrote during context teardown, without needing
+    # pytest-playwright to expose that path itself.
+    output_dir = item.config.getoption("--output") or "test-results"
+    video = pathlib.Path(output_dir) / slugify(item.nodeid) / "video.webm"
+    return video if video.is_file() else None
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
+    """Embed a screenshot and (if recorded) a video directly into
+    test-results/report.html, so the pass/fail/duration table isn't the only
+    thing visible there — clicking a row shows what the browser actually
+    rendered, without having to go dig through test-results/<test>/ by hand.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    extra = getattr(report, "extras", [])
+
+    if report.when == "call":
+        page: Page | None = item.funcargs.get("page")
+        if page is not None and not page.is_closed():
+            try:
+                png_bytes = page.screenshot(full_page=True)
+            except Exception:
+                png_bytes = None
+            if png_bytes:
+                extra.append(pytest_html.extras.png(base64.b64encode(png_bytes).decode()))
+
+    if report.when == "teardown":
+        video = _video_path(item)
+        if video is not None:
+            extra.append(
+                pytest_html.extras.video(
+                    base64.b64encode(video.read_bytes()).decode(),
+                    mime_type="video/webm",
+                    extension="webm",
+                )
+            )
+
+    if extra:
+        report.extras = extra
 
 
 @pytest.fixture(scope="session")
