@@ -100,10 +100,71 @@ services:
     environment:
       BASE_URL: http://app:8000
       S3_INTERNAL_BASE_URL: http://s3:8000/algodoo-assets-local
+      ASSET_PUBLIC_BASE_URL: http://localhost:8002/algodoo-assets-local
       LEGACY_X_API_KEY: local-x-api-key
+      # For the migration integration test (old 4 tables -> single table).
+      AWS_REGION: ap-northeast-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      DDB_ENDPOINT_URL: http://dynamodb:8000
+      DDB_TABLE_NAME: algodoo-main-migration
       UV_LINK_MODE: copy
     depends_on:
       app:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - uv-cache:/root/.cache/uv
+
+  # Cognito auth backend test: the same moto server also emulates cognito-idp.
+  app-cognito:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    profiles: ["test-cognito"]
+    working_dir: /app
+    command: ["sh", "/app/scripts/start-cognito-test.sh"]
+    environment:
+      APP_NAME: algodooonline
+      AWS_REGION: ap-northeast-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      DDB_TABLE_NAME: algodoo-main-cognito
+      DDB_ENDPOINT_URL: http://dynamodb:8000
+      SEED_DEMO_DATA: "false"
+      AUTH_BACKEND: cognito
+      COGNITO_ENDPOINT_URL: http://dynamodb:8000
+      LEGACY_X_API_KEY: cognito-test-api-key
+      UV_LINK_MODE: copy
+    ports:
+      - "8081:8000"
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/healthz', timeout=2).read()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+    volumes:
+      - .:/app
+      - uv-cache:/root/.cache/uv
+
+  integration-cognito:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    profiles: ["test-cognito"]
+    working_dir: /app
+    command: ["sh", "/app/scripts/integration-cognito.sh"]
+    environment:
+      BASE_URL: http://app-cognito:8000
+      UV_LINK_MODE: copy
+    depends_on:
+      app-cognito:
         condition: service_healthy
     volumes:
       - .:/app

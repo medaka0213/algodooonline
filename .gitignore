@@ -14,3 +14,8 @@ vendor/ddb-single/
 
 # Runtime thread attachments (local or mirrored from S3); created by bootstrap / uploads
 apps/web/src/algodoo_web/media/
+
+# Production secrets (commit only .env.production.example / .env.ci)
+.env.production
+.env
+.env.local

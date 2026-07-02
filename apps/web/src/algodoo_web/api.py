@@ -20,7 +20,7 @@ from algodoo_data.repository import (
     thread_payload,
     update_log_details,
     update_thread_details,
-    update_user_from_token,
+    upsert_user_from_claims,
     user_payload,
 )
 from algodoo_data.uploads import validate_thread_filedata
@@ -28,6 +28,7 @@ from algodoo_domain.models import LegacyRoute, LikeType
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from algodoo_web.asset_store import normalize_and_persist_filedata
+from algodoo_web.auth import get_auth_backend
 from algodoo_web.legacy_api_guard import (
     require_configured_api_key,
     require_matching_user_id,
@@ -367,5 +368,8 @@ def api_signin_user(body: dict[str, Any] = Body(default_factory=dict)) -> dict[s
 @router.post("/user/update")
 def api_update_user(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, object]:
     data = _submission(body)
-    user = update_user_from_token(str(data.get("idToken", "")))
+    claims = get_auth_backend().verify_id_token(str(data.get("idToken", "")))
+    if claims is None:
+        raise HTTPException(status_code=401, detail="invalid id token")
+    user = upsert_user_from_claims(claims)
     return {"result": True, "user_info": user_payload(user)}

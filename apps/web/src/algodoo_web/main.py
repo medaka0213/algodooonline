@@ -1,7 +1,7 @@
 import json
 import re
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -12,7 +12,6 @@ from algodoo_data.repository import (
     create_like,
     create_log,
     create_thread,
-    create_user,
     delete_like,
     delete_log,
     delete_thread,
@@ -25,20 +24,27 @@ from algodoo_data.repository import (
     list_threads,
     update_log_details,
     update_thread_details,
+    upsert_user_from_claims,
 )
 from algodoo_data.uploads import validate_thread_filedata
 from algodoo_domain.models import LegacyRoute, LikeType
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from mangum import Mangum
 from markupsafe import Markup
 from starlette.staticfiles import StaticFiles
 
 from algodoo_web.api import router as api_router
 from algodoo_web.asset_store import media_public_url, media_root, normalize_and_persist_filedata
+from algodoo_web.auth import AuthError, get_auth_backend
+from algodoo_web.auth.cookies import (
+    apply_session_cookies,
+    parse_session_expiry,
+    strip_auth_cookies,
+)
 from algodoo_web.bootstrap import bootstrap_data
-from algodoo_web.session_refresh import LocalSessionRefreshMiddleware, parse_session_expiry
+from algodoo_web.config import get_settings, validate_production_settings
+from algodoo_web.session_refresh import SessionRefreshMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -68,18 +74,18 @@ SORT_OPTIONS = [
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    validate_production_settings(get_settings())
     bootstrap_data()
     yield
 
 
 app = FastAPI(title="algodooonline", version="0.1.0", lifespan=lifespan)
-app.add_middleware(LocalSessionRefreshMiddleware)
+app.add_middleware(SessionRefreshMiddleware)
 app.include_router(api_router)
 app.include_router(api_router, prefix="/api")
 MEDIA_DIR = media_root()
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
-handler = Mangum(app)
 
 
 @app.get("/healthz")
@@ -110,23 +116,31 @@ async def _form_data(request: Request) -> dict[str, str]:
     return {key: values[-1] if values else "" for key, values in parsed.items()}
 
 
-def _current_user(request: Request) -> dict[str, str] | None:
+def _resolve_current_user(request: Request) -> dict[str, str] | None:
     token = request.cookies.get("algodoo_idtoken")
     if not token:
         return None
     refresh_deadline = parse_session_expiry(request.cookies.get("algodoo_refresh_exp", ""))
     if refresh_deadline is not None and refresh_deadline < datetime.now(UTC):
         return None
-    name = request.cookies.get("algodoo_name") or "anonymous"
-    sub = request.cookies.get("algodoo_sub") or f"local-{name}"
+    claims = get_auth_backend().verify_id_token(token)
+    if claims is None:
+        return None
     return {
-        "name": name,
-        "sub": sub,
+        "name": str(claims.get("name") or "anonymous"),
+        "sub": str(claims.get("sub") or ""),
         "idToken": token,
         "refreshToken": request.cookies.get("algodoo_refresh", ""),
         "refreshTokenExp": request.cookies.get("algodoo_refresh_exp", ""),
         "status": "authenticated",
     }
+
+
+def _current_user(request: Request) -> dict[str, str] | None:
+    # Token verification can hit JWKS/DB; resolve once per request.
+    if not hasattr(request.state, "auth_user"):
+        request.state.auth_user = _resolve_current_user(request)
+    return request.state.auth_user
 
 
 def _require_user(request: Request) -> dict[str, str]:
@@ -210,9 +224,15 @@ def _snippet(value: str, query_text: str, length: int = 300) -> str:
     return f"{prefix}{value[start:end]}{suffix}"
 
 
+# Declaration-like tokens (`<!...`, `<?...`, `<\...`) are dropped token-wise;
+# the old sanitizer nulled them but the rest of the body must survive (SPEC §15).
+_MARKDOWN_DECLARATION_TOKEN = re.compile(r"<[!?\\][^>\n]*>?")
+
+
 def _markdown(value: str) -> Markup:
-    if not value or value.lstrip().startswith(("<!", "<?", "<\\")):
+    if not value:
         return Markup("")
+    value = _MARKDOWN_DECLARATION_TOKEN.sub("", value)
     raw_html = markdown.markdown(
         value,
         extensions=["fenced_code", "tables", "nl2br", "sane_lists"],
@@ -255,7 +275,9 @@ def _markdown(value: str) -> Markup:
         raw_html,
         tags=allowed_tags,
         attributes=allowed_attrs,
+        protocols=["http", "https"],
         strip=True,
+        strip_comments=True,
     )
     return Markup(cleaned)
 
@@ -483,6 +505,7 @@ def login_page(request: Request) -> HTMLResponse:
 async def login_submit(request: Request):
     form = await _form_data(request)
     username = form.get("Username", "").strip()
+    password = form.get("password", "")
     user = get_user(username)
     if user and user.version == "1":
         return templates.TemplateResponse(
@@ -490,36 +513,37 @@ async def login_submit(request: Request):
             name="index.html",
             context={**_base_context(request), "page": "login", "v1_username": username},
         )
-    if user is None:
-        user = create_user(
-            username=username,
-            email=f"{username}@local.invalid",
-            sub=f"local-{username}",
+    backend = get_auth_backend()
+    try:
+        tokens = backend.sign_in(username, password)
+    except AuthError as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                **_base_context(request),
+                "page": "login",
+                "v1_username": "",
+                "form_error": exc.message,
+            },
+            status_code=401,
         )
+    claims = backend.verify_id_token(tokens.id_token)
+    if claims is None:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                **_base_context(request),
+                "page": "login",
+                "v1_username": "",
+                "form_error": "IDトークンを検証できませんでした",
+            },
+            status_code=401,
+        )
+    upsert_user_from_claims(claims)
     response = RedirectResponse(url="/", status_code=303)
-    now = datetime.now(UTC)
-    response.set_cookie("algodoo_name", username, httponly=True, samesite="lax")
-    response.set_cookie("algodoo_sub", user.sub, httponly=True, samesite="lax")
-    response.set_cookie("algodoo_idtoken", f"local-token-{username}", httponly=True, samesite="lax")
-    response.set_cookie(
-        "algodoo_refresh",
-        f"local-refresh-{username}",
-        httponly=True,
-        samesite="lax",
-    )
-    response.set_cookie(
-        "algodoo_access_exp",
-        (now + timedelta(minutes=15)).isoformat(),
-        httponly=True,
-        samesite="lax",
-    )
-    response.set_cookie(
-        "algodoo_refresh_exp",
-        (now + timedelta(days=30)).isoformat(),
-        httponly=True,
-        samesite="lax",
-    )
-    return response
+    return apply_session_cookies(response, tokens)
 
 
 @app.get("/auth/signup", response_class=HTMLResponse)
@@ -543,24 +567,37 @@ async def signup_submit(request: Request, username: str = ""):
     form = await _form_data(request)
     step = form.get("step", "register")
     selected_username = username or form.get("Username", "").strip()
-    if step == "verify":
-        create_user(
-            username=selected_username,
-            email=form.get("email", f"{selected_username}@local.invalid"),
-            sub=f"local-{selected_username}",
+    backend = get_auth_backend()
+
+    def _render(verify: bool, form_error: str | None = None, status_code: int = 200):
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                **_base_context(request),
+                "page": "signup",
+                "fixed_username": selected_username,
+                "email": form.get("email", ""),
+                "verify": verify,
+                "form_error": form_error,
+            },
+            status_code=status_code,
         )
+
+    if step == "verify":
+        try:
+            backend.confirm_sign_up(selected_username, form.get("actKey", "").strip())
+        except AuthError as exc:
+            return _render(verify=True, form_error=exc.message, status_code=422)
         return RedirectResponse(url="/auth/login", status_code=303)
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context={
-            **_base_context(request),
-            "page": "signup",
-            "fixed_username": selected_username,
-            "email": form.get("email", ""),
-            "verify": True,
-        },
-    )
+    password = form.get("password", "")
+    if password != form.get("password_confirm", ""):
+        return _render(verify=False, form_error="パスワードが一致しません", status_code=422)
+    try:
+        backend.sign_up(selected_username, form.get("email", "").strip(), password)
+    except AuthError as exc:
+        return _render(verify=False, form_error=exc.message, status_code=422)
+    return _render(verify=True)
 
 
 @app.get("/auth/logout", response_class=HTMLResponse)
@@ -577,16 +614,7 @@ def logout_page(request: Request):
 @app.post("/auth/logout")
 def logout_submit() -> RedirectResponse:
     response = RedirectResponse(url="/", status_code=303)
-    for key in [
-        "algodoo_name",
-        "algodoo_sub",
-        "algodoo_idtoken",
-        "algodoo_refresh",
-        "algodoo_refresh_exp",
-        "algodoo_access_exp",
-    ]:
-        response.delete_cookie(key)
-    return response
+    return strip_auth_cookies(response)
 
 
 @app.get("/auth/changepass", response_class=HTMLResponse)
@@ -600,9 +628,27 @@ def changepass_page(request: Request):
     )
 
 
-@app.post("/auth/changepass")
-async def changepass_submit(request: Request) -> RedirectResponse:
-    _require_user(request)
+@app.post("/auth/changepass", response_model=None)
+async def changepass_submit(request: Request) -> RedirectResponse | HTMLResponse:
+    user = _require_user(request)
+    form = await _form_data(request)
+    username = form.get("Username", "").strip() or user["name"]
+    new_password = form.get("new_password", "")
+
+    def _render(form_error: str):
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={**_base_context(request), "page": "changepass", "form_error": form_error},
+            status_code=422,
+        )
+
+    if new_password != form.get("new_password_confirm", ""):
+        return _render("新しいパスワードが一致しません")
+    try:
+        get_auth_backend().change_password(username, form.get("password", ""), new_password)
+    except AuthError as exc:
+        return _render(exc.message)
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -618,18 +664,39 @@ def forgotpass_page(request: Request) -> HTMLResponse:
 @app.post("/auth/forgotpass")
 async def forgotpass_submit(request: Request):
     form = await _form_data(request)
+    username = form.get("Username", "").strip()
+    backend = get_auth_backend()
+
+    def _render(recover: bool, form_error: str | None = None, status_code: int = 200):
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                **_base_context(request),
+                "page": "forgotpass",
+                "recover": recover,
+                "forgot_username": username,
+                "form_error": form_error,
+            },
+            status_code=status_code,
+        )
+
     if form.get("step") == "recover":
+        password = form.get("password", "")
+        if password != form.get("password_confirm", ""):
+            return _render(
+                recover=True, form_error="新しいパスワードが一致しません", status_code=422
+            )
+        try:
+            backend.confirm_forgot_password(username, form.get("actKey", "").strip(), password)
+        except AuthError as exc:
+            return _render(recover=True, form_error=exc.message, status_code=422)
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context={
-            **_base_context(request),
-            "page": "forgotpass",
-            "recover": True,
-            "forgot_username": form.get("Username", ""),
-        },
-    )
+    try:
+        backend.forgot_password(username)
+    except AuthError as exc:
+        return _render(recover=False, form_error=exc.message, status_code=422)
+    return _render(recover=True)
 
 
 @app.post("/i/{route}/threads", response_model=None)

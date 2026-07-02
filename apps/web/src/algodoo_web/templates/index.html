@@ -279,13 +279,13 @@
       }
       .markdown-body { overflow-wrap: anywhere; }
       .markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: .5rem 0; }
-      .attachment-list, .slideshow {
+      .slideshow {
         display: flex;
         flex-wrap: wrap;
         gap: .75rem;
         margin: 1rem 0;
       }
-      .attachment, .download-block {
+      .download-block {
         display: inline-block;
         padding: .5rem .75rem;
         border: 1px solid #dee2e6;
@@ -655,6 +655,9 @@
 
       {% if page in ["login", "signup", "logout", "changepass", "forgotpass"] %}
       <section class="auth-card">
+        {% if form_error %}
+        <p class="form-error">{{ form_error }}</p>
+        {% endif %}
         {% if page == "login" %}
         <h1>ログインする</h1>
         {% if v1_username %}
@@ -822,9 +825,6 @@
           {% if data_primary_phz_url %}
           <p><a class="download-phz-link" href="{{ data_primary_phz_url }}">ダウンロード</a></p>
           {% endif %}
-          <div class="attachment-list">
-            {% for file in selected_thread.filedata %}<a class="attachment" href="{{ file|media_url }}">{{ file[0:80] }}</a>{% endfor %}
-          </div>
         </div>
         {% endif %}
         <h1>{{ selected_thread.title }}</h1>
@@ -881,11 +881,6 @@
                 <button type="button" class="slide-thumb{% if loop.first %} is-active{% endif %}" data-slide-src="{{ u }}" aria-label="画像{{ loop.index }}"><img src="{{ u }}" alt="" /></button>
                 {% endfor %}
               </div>
-            </div>
-            {% endif %}
-            {% if selected_thread.filedata %}
-            <div class="attachment-list">
-              {% for file in selected_thread.filedata %}<a class="attachment" href="{{ file|media_url }}">{{ file[0:80] }}</a>{% endfor %}
             </div>
             {% endif %}
           </div>

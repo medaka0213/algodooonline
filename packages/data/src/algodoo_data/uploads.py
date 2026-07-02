@@ -5,11 +5,28 @@ from __future__ import annotations
 import base64
 import binascii
 import io
+import re
 import zipfile
 
 from algodoo_domain.models import LegacyRoute
 
 _JPEG_PREFIX = "data:image/jpeg;base64,"
+
+_IMAGE_KEY = re.compile(r"^IMAGE/[A-Za-z0-9_.-]+\.(?:jpe?g|png|gif|webp)$")
+_DATA_KEY = re.compile(r"^DATA/[A-Za-z0-9_.-]+(?:\.(?:phz|phn)|_thumb\.png)$")
+
+
+def validate_storage_key(route: LegacyRoute, key: str) -> str | None:
+    """Reject pre-existing filedata keys that do not match the old S3 layout."""
+    if route == LegacyRoute.IMAGE:
+        pattern = _IMAGE_KEY
+    elif route == LegacyRoute.DATA:
+        pattern = _DATA_KEY
+    else:
+        return f"filedata keys are not supported for route {route.value}"
+    if not pattern.fullmatch(key):
+        return f"invalid filedata key: {key}"
+    return None
 
 
 def parse_data_url(value: str) -> tuple[str, bytes] | None:

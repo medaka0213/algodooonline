@@ -10,9 +10,13 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -40,13 +44,75 @@ jobs:
   integration:
     name: Docker Compose Integration Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Run local integration test
+      - name: Run local integration test (web + legacy API + migration)
         run: docker compose --profile test up --abort-on-container-exit --exit-code-from integration
 
       - name: Stop local integration stack
         if: always()
         run: docker compose down --volumes
+
+  integration-cognito:
+    name: Cognito Auth Backend Integration Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run cognito integration test (moto cognito-idp)
+        run: >
+          docker compose --profile test-cognito up
+          --abort-on-container-exit --exit-code-from integration-cognito
+
+      - name: Stop cognito integration stack
+        if: always()
+        run: docker compose --profile test-cognito down --volumes
+
+  prod-image:
+    name: Production Image + Compose Topology Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build and start the production topology (local auth backend)
+        run: docker compose -f docker-compose.prod.yml --env-file .env.ci up -d --build
+
+      - name: Wait for app health
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "app never became healthy" >&2
+          docker compose -f docker-compose.prod.yml --env-file .env.ci logs app
+          exit 1
+
+      - name: Run integration test against the production topology
+        env:
+          BASE_URL: http://127.0.0.1:8080
+          ASSET_PUBLIC_BASE_URL: http://localhost:9000/algodoo-assets
+          S3_INTERNAL_BASE_URL: http://127.0.0.1:9000/algodoo-assets
+          LEGACY_X_API_KEY: local-x-api-key
+        run: python3 scripts/integration_local.py
+
+      - name: Stop production topology
+        if: always()
+        run: docker compose -f docker-compose.prod.yml --env-file .env.ci down --volumes

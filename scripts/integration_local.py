@@ -12,6 +12,9 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 S3_INTERNAL_BASE_URL = os.environ.get("S3_INTERNAL_BASE_URL", "").rstrip("/")
+ASSET_PUBLIC_BASE_URL = os.environ.get(
+    "ASSET_PUBLIC_BASE_URL", "http://localhost:8002/algodoo-assets-local"
+).rstrip("/")
 OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
 GUEST_API_OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
 
@@ -49,7 +52,7 @@ def fetch_guest(path: str) -> str:
 
 
 def assert_s3_object_url_rendered(html: str, storage_prefix: str) -> None:
-    public_prefix = "http://localhost:8002/algodoo-assets-local/"
+    public_prefix = f"{ASSET_PUBLIC_BASE_URL}/"
     marker = f"{public_prefix}{storage_prefix}"
     assert marker in html
     if not S3_INTERNAL_BASE_URL:
@@ -317,6 +320,22 @@ def main() -> None:
     assert_thread_list_layout("WIKI", wiki_path, expect_preview=False)
     assert "<h2>Markdown integration</h2>" in fetch(wiki_path)
 
+    sanitizer_path = post(
+        "/i/WIKI/threads",
+        {
+            "title": f"Sanitize {suffix}",
+            "content": "<!-- secretcomment123 -->visible text [evil](javascript:alert(1))",
+            "filedata": "",
+        },
+    )
+    sanitizer_html = fetch(sanitizer_path)
+    # Rendered markdown keeps the body, drops the declaration token and the
+    # javascript: href. The raw text also sits (escaped) in the edit textarea,
+    # so assert on the unescaped rendered forms only.
+    assert "<p>visible text <a>evil</a></p>" in sanitizer_html
+    assert "<!-- secretcomment123" not in sanitizer_html
+    assert 'href="javascript' not in sanitizer_html
+
     image_data_url = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w=="
     image_path = post(
         "/i/IMAGE/threads",
@@ -341,6 +360,25 @@ def main() -> None:
     assert ".phz" in data_html
     assert_s3_object_url_rendered(data_html, "DATA/")
     assert_thread_list_layout("DATA", data_path, expect_preview=True)
+    # Old DownloadPHZ/SlideShow have no raw attachment listing (SPEC §7.1).
+    assert 'class="attachment"' not in data_html
+    assert 'class="attachment"' not in image_html
+
+    bad_key = api(
+        "POST",
+        "/threads/DATA",
+        {
+            "submition": {
+                "user_name": integration_user,
+                "user_id": integration_sub,
+                "title": f"Bad key {suffix}",
+                "content": "must be rejected",
+                "filedata": ["../etc/passwd"],
+            }
+        },
+    )
+    assert bad_key["result"] is False
+    assert "filedata" in bad_key["errors"]
 
     api_thread = api(
         "POST",

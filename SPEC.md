@@ -38,18 +38,19 @@
 - DynamoDBのアクセス層は `DynamoDB-SingleTable` を使う。
 - `DynamoDB-SingleTable` は別リポジトリなので、このリポジトリにvendoringしてコミットしない。
 - 旧DynamoDBの4テーブル構成からsingle-tableへ移行できるように、ID・旧v1属性・移行状態を保持する。
-- デプロイ先はAWSサーバーレスかつ従量課金前提にする。
+- デプロイ先は Linux ホスト上の Docker Compose セルフホスト構成にする（詳細は直後の「本番構成」節）。
 - ローカルでは Docker Compose だけで画面・認証代替・DynamoDB互換ストア・APIの結合試験を完結させる。
 
-推奨AWS構成は以下です。
+本番構成は「Linuxホスト上のDocker Composeによるセルフホスト + 実Cognito」を正とする（2026-07 決定）。
 
-- FastAPI app: AWS Lambda + Mangum
-- 公開入口: Lambda Function URL または API Gateway HTTP API
-- 認証: Amazon Cognito User Pool
-- DB: DynamoDB on-demand
-- ファイル: S3
-- 静的配信が必要な場合: CloudFront + S3。ただしSSR中心なら必須ではない。
-- ローカルDynamoDB互換: Docker Compose 内の DynamoDB Local または moto。アプリコードは本番と同じ `boto3 + ddb_single` 経由にする。
+- FastAPI app: 自前ビルドのDockerイメージ（`Dockerfile`）を `docker-compose.prod.yml` で常駐させる
+- 公開入口: ホスト側リバースプロキシ（nginx/Caddy）でTLS終端し `127.0.0.1:8080` へ（`deploy/Caddyfile.example`）
+- 認証: Amazon Cognito User Pool（`AUTH_BACKEND=cognito`。ローカル・CIは `local` 擬似セッション）
+- DB: compose同梱の DynamoDB Local（永続ボリューム）。アプリコードは `boto3 + ddb_single` のまま
+- ファイル: compose同梱の MinIO（S3互換、匿名downloadポリシー + `ASSET_PUBLIC_BASE_URL` 直配信）
+- ローカルDynamoDB互換: Docker Compose 内の moto。アプリコードは本番と同じ `boto3 + ddb_single` 経由にする
+
+旧推奨だったAWSサーバーレス構成（Lambda + Mangum + API Gateway + DynamoDB on-demand + S3）は将来の選択肢として残すが、現行コードはcompose常駐前提でMangumを持たない。
 
 ## 3. ルートと掲示板種別
 
@@ -455,10 +456,10 @@
 | GET | `/threads/{route}/{thread_id}` | 不要 | なし | `{"thread_info": thread}` |
 | PUT | `/threads/{route}/{thread_id}` | 必須 | `{"submition": edited_thread}` | `{"result": true}` or validation errors |
 | DELETE | `/threads/{route}/{thread_id}` | 必須 | なし | `{"result": true}` |
-| GET | `/bbslogs/{thread_id}` | 不要 | なし | `{"submitions": [log...]}` |
+| GET | `/bbslogs/{thread_id}` | 必須(※) | なし | `{"submitions": [log...]}` |
 | POST | `/bbslogs/{thread_id}` | 必須 | `{"submition": log}` | `{"result": true}` or validation errors |
-| GET | `/bbslogs/{thread_id}/{log_id}` | 不要 | なし | `{"log_info": log}` |
-| GET | `/bbslogs/{thread_id}/{log_id}/responses` | 不要 | なし | `{"responses": [log...]}` |
+| GET | `/bbslogs/{thread_id}/{log_id}` | 必須(※) | なし | `{"log_info": log}` |
+| GET | `/bbslogs/{thread_id}/{log_id}/responses` | 必須(※) | なし | `{"responses": [log...]}` |
 | POST | `/bbslogs/{thread_id}/{log_id}` | 必須 | `{"submition": log}` | `{"result": true}` or validation errors |
 | PUT | `/bbslogs/{thread_id}/{log_id}` | 必須 | `{"submition": edited_log}` | `{"result": true}` or validation errors |
 | DELETE | `/bbslogs/{thread_id}/{log_id}` | 必須 | なし | `{"result": true}` |
@@ -472,6 +473,8 @@
 | POST | `/user/update` | 不要 | `{"submition": {"idToken": "..."}}` | `{"result": true, "user_info": user}` |
 
 新実装で内部APIに `/api` prefix を持ってもよいが、旧互換APIは上記パスで動く必要がある。
+
+(※) 旧Chalice実装ではGET `/bbslogs` 系は認証不要だったが、旧フロントはログイン時のみ取得しており（§7参照）、移行後は互換優先で未ログインにログ本文を公開しないため認証必須に変更した。
 
 ## 12. データ仕様
 
@@ -630,6 +633,13 @@ Like集計は `n_good`, `n_bad`, `n_total` を返す。post本体側には `nLik
 
 移行後はPython側でMarkdown変換する場合も、上記と同等以上のサニタイズを行う。未サニタイズHTMLをそのまま出してはいけない。
 
+移行後の実装は拒否リストではなくallowlist方式（`bleach`）を正とする。
+
+- 許可タグは見出し・段落・リスト・テーブル・コード・引用・`a`・`img` などの表示系のみ。旧拒否リストのタグ（`script` 等）はallowlist非収載として除去される。
+- 許可属性は `a[href, title, rel]`, `img[src, alt, title, loading]`, `code[class]`, `th/td[align]` のみ。`href`/`src` は `http`/`https` プロトコルに限定し、`javascript:` 等は除去する。旧仕様の「`href` 全面拒否」はMarkdownのリンク表現を成立させるため、プロトコル制限付き許可に置き換える。
+- `on*`, `id`, `action`, `data-*` はallowlist非収載のため従来どおり除去される。
+- `<!`, `<?`, `<\` で始まるトークンはトークン単位で除去し、本文の残りは通常どおり変換する（入力全体を空にしない）。
+
 ## 16. エラー表示仕様
 
 旧フロントのAPI wrapperは、レスポンス `result` がfalseの場合に `errors` を `Server-side Error` から始まる複数行の文字列に変換し、`.form-error` に赤文字で表示します。
@@ -697,5 +707,7 @@ Docker Compose 起動後に、ブラウザまたはHTTPテストだけで以下�
 補足として、旧互換の `GET /`（`message` にトークン相当の情報を載せる）は、ブラウザ向け HTML の `GET /` と衝突しないよう、`Accept` の先頭メディアタイプが `application/json` のときだけ JSON を返し、未認証なら 401 とする。スレッド詳細の返信一覧は、旧画面のログイン時のみ取得に合わせ、未ログインの画面では返信一覧を出さない。
 
 **実装進捗（2026-05-05 追記）**: 旧互換 API は `LEGACY_X_API_KEY`（既定 `local-x-api-key`）と `x-api-key` ヘッダの一致を必須とし、添付は `media/` 下へ `IMAGE/`・`DATA/` キーで保存（Data URL は正規化）、PHZ zip 検証と `thumb.png` 抽出、PHN UTF-8 検証、ローカル Cookie の `access_exp`/`refresh_exp` とレスポンス後の擬似トークン更新、スレッド詳細の `IMAGE` カルーセル（矢印・サムネ・スワイプ）、`DATA` の黄色枠ダウンロードブロック、`WIKI`/`IMAGE`/`DATA` スレッドフォームの EasyMDE、`IMAGE` 選択時の canvas による JPEG 化、`markdown`+`bleach` によるスレッド/ログ Markdown、サーバーフォーム失敗時の `Server-side Error` 複数行 `.form-error`、返信ツリー用 `responses_by_log` の全親キー対応を追加した。本番 S3 保存と本物の Cognito refresh は引き続きローカル代替の範囲である。
+
+**実装進捗（2026-07-02 追記）**: 本番化対応として以下を実施した。(1) 実 Cognito 認証を実装（`AUTH_BACKEND=cognito`。`boto3 cognito-idp` の USER_PASSWORD_AUTH / sign_up / confirm_sign_up / forgot_password / change_password / REFRESH_TOKEN_AUTH、PyJWT + JWKS による idToken 署名検証）。ローカル・CI は従来の擬似セッション（`AUTH_BACKEND=local`）を `auth/local.py` として維持し、`scripts/integration_cognito.py`（moto cognito-idp）で Cognito 経路を結合テストする。旧互換 API の認可も Cookie 存在確認から idToken 検証（Cookie または旧 Chalice 互換の Authorization ヘッダ）に置き換えた。(2) 本番実行基盤としてマルチステージ `Dockerfile` と `docker-compose.prod.yml`（app + DynamoDB Local 永続化 + MinIO + minio-init）を追加し、Mangum を除去。TLS はホスト側リバースプロキシに委譲（`deploy/Caddyfile.example`）。(3) 旧 4 テーブル→single-table の移行スクリプト `scripts/migrate_v2_import.py`（旧 ID・v1_* 保持、upsert 冪等、`--dry-run`/`--recompute-counts`）と結合テスト `scripts/integration_migration.py` を追加。(4) §11 表の GET /bbslogs 系 auth 要件、§15 の allowlist サニタイザ方針を実装に合わせて更新し、`<!` 始まり本文の全体空化をトークン単位除去に修正、DATA/IMAGE 詳細の余分な添付一覧を削除、`filedata` の素通しキーを旧 S3 キー規約で検証するようにした。
 
 **実装進捗（2026-05-06 追記）**: `GET /bbslogs/...` 系の旧互換 API はブラウザ同様にセッション Cookie 必須とした。`refresh_exp` が切れた Cookie は未ログイン扱いとし、ミドルウェアで認証 Cookie を削除する。Cerberus 風 `errors` に加え `message` フィールド（`Server-side Error` 先頭の複数行）を返す。環境変数 `ASSET_S3_BUCKET` 等が設定されていれば boto3 で S3 にオブジェクト保存し、`ASSET_PUBLIC_BASE_URL` で配信 URL を組み立てる（未設定時は従来どおり `/media/`）。`WIKI`/`IMAGE`/`DATA` のログ投稿・返信・編集テキストエリアにも EasyMDE を付与した。本物の Cognito JWT 検証・refresh は本番接続時に差し替える前提である。

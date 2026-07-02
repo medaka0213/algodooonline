@@ -1,9 +1,13 @@
-"""Legacy JSON API gates: x-api-key (SPEC §11) and session for mutating routes."""
+"""Legacy JSON API gates: x-api-key (SPEC §11) and verified session for auth routes."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import HTTPException, Request
 
+from algodoo_web.auth import get_auth_backend
+from algodoo_web.auth.cookies import parse_session_expiry
 from algodoo_web.config import get_settings
 
 
@@ -16,10 +20,28 @@ def require_configured_api_key(request: Request) -> None:
         raise HTTPException(status_code=403, detail="invalid x-api-key")
 
 
+def _session_token(request: Request) -> str | None:
+    token = request.cookies.get("algodoo_idtoken")
+    if token:
+        refresh_deadline = parse_session_expiry(request.cookies.get("algodoo_refresh_exp", ""))
+        if refresh_deadline is not None and refresh_deadline < datetime.now(UTC):
+            return None
+        return token
+    # The old Chalice API authenticated with the raw idToken in Authorization.
+    header = (request.headers.get("authorization") or "").strip()
+    if header.lower().startswith("bearer "):
+        header = header[len("bearer ") :].strip()
+    return header or None
+
+
 def session_sub(request: Request) -> str | None:
-    if not request.cookies.get("algodoo_idtoken"):
+    token = _session_token(request)
+    if not token:
         return None
-    return request.cookies.get("algodoo_sub") or None
+    claims = get_auth_backend().verify_id_token(token)
+    if not claims:
+        return None
+    return str(claims.get("sub") or "") or None
 
 
 def require_session(request: Request) -> str:

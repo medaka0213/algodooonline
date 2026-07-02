@@ -12,6 +12,7 @@ from algodoo_data.uploads import (
     validate_jpeg_bytes,
     validate_phn_bytes,
     validate_phz_bytes,
+    validate_storage_key,
 )
 from algodoo_domain.models import LegacyRoute
 
@@ -19,6 +20,9 @@ from algodoo_web.config import get_settings
 
 
 def media_root() -> Path:
+    override = get_settings().media_root_override
+    if override:
+        return Path(override)
     return Path(__file__).resolve().parent / "media"
 
 
@@ -38,6 +42,21 @@ def media_public_url(key: str) -> str:
     return k
 
 
+def asset_s3_client_kwargs() -> dict:
+    settings = get_settings()
+    kwargs: dict = {"region_name": settings.aws_region}
+    if settings.asset_s3_endpoint_url:
+        kwargs["endpoint_url"] = settings.asset_s3_endpoint_url
+    if settings.asset_s3_access_key_id or settings.asset_s3_secret_access_key:
+        if not settings.asset_s3_access_key_id or not settings.asset_s3_secret_access_key:
+            raise RuntimeError(
+                "ASSET_S3_ACCESS_KEY_ID and ASSET_S3_SECRET_ACCESS_KEY must be set together"
+            )
+        kwargs["aws_access_key_id"] = settings.asset_s3_access_key_id
+        kwargs["aws_secret_access_key"] = settings.asset_s3_secret_access_key
+    return kwargs
+
+
 def _s3_object_key(storage_key: str) -> str:
     prefix = get_settings().asset_s3_prefix
     return f"{prefix}/{storage_key}" if prefix else storage_key
@@ -51,10 +70,7 @@ def _persist_file_bytes(storage_key: str, body: bytes, content_type: str) -> str
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(body)
         return None
-    client_kwargs = {"region_name": settings.aws_region}
-    if settings.asset_s3_endpoint_url:
-        client_kwargs["endpoint_url"] = settings.asset_s3_endpoint_url
-    client = boto3.client("s3", **client_kwargs)
+    client = boto3.client("s3", **asset_s3_client_kwargs())
     key = _s3_object_key(storage_key)
     extra: dict = {
         "Bucket": settings.asset_s3_bucket,
@@ -97,8 +113,9 @@ def normalize_and_persist_filedata(
         if not item:
             continue
         if not item.startswith("data:"):
-            if item.startswith(("IMAGE/", "DATA/")):
-                out.append(item)
+            if err := validate_storage_key(route, item):
+                return [], err
+            out.append(item)
             continue
         parsed = parse_data_url(item)
         if not parsed:

@@ -6,17 +6,19 @@
 
 ## 方針
 
-- UI と API は `FastAPI + Jinja2` で統合し、Lambda 上で 1 アプリとして動かす
-- 認証は Cognito を維持しつつ、フロント直書きのトークン管理からサーバー主導のセッション設計へ移す
-- DynamoDB は維持し、物理テーブルは `ddb_single` を使った single-table 設計へ寄せる
-- デプロイ先は AWS サーバーレス前提。従量課金で無料枠に収まりやすい構成を選ぶ
+- UI と API は `FastAPI + Jinja2` で統合し、1 アプリとして動かす
+- 本番は Linux ホスト上の Docker Compose セルフホスト構成（`docker-compose.prod.yml`）
+- 認証は Amazon Cognito（`AUTH_BACKEND=cognito`）。ローカル・CI は擬似セッション（`AUTH_BACKEND=local`）
+- DynamoDB 互換ストア（本番: compose 同梱の DynamoDB Local、ローカル: moto）を `ddb_single` の single-table 設計で使う
+- 添付ファイルは S3 互換ストア（本番: compose 同梱の MinIO、ローカル: moto）
 
 ## 構成
 
-- `apps/web`: 画面と API をまとめた新しい Python アプリ
+- `apps/web`: 画面と API をまとめた Python アプリ
 - `packages/domain`: ドメインモデル
 - `packages/data`: DynamoDB single-table モデルとデータ層
-- `scripts`: ローカル起動と結合テスト
+- `scripts`: ローカル起動・結合テスト・移行スクリプト
+- `Dockerfile` / `docker-compose.prod.yml` / `deploy/`: 本番実行基盤
 
 ## 開始コマンド
 
@@ -25,7 +27,7 @@ uv sync --all-packages
 uv run --package algodoo-web uvicorn algodoo_web.main:app --reload
 ```
 
-## Docker Compose
+## Docker Compose（ローカル開発）
 
 ```bash
 docker compose up
@@ -38,9 +40,43 @@ docker compose up
 初回起動時にアプリが DynamoDB single-table を自動作成し、デモ用の thread/log/like を投入します。
 ローカル compose では DynamoDB と S3 の API 互換 `moto_server` を別コンテナとして立ち上げます。アプリ側のデータアクセスは `boto3 + ddb_single`、添付保存は `boto3` S3 client のままです。
 
+## 本番デプロイ（Linux ホスト + Docker Compose）
+
+```bash
+cp .env.production.example .env.production   # プレースホルダを実値に置換
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+- `app`: マルチステージ `Dockerfile` でビルドした non-root イメージ（uvicorn workers）
+- `dynamodb`: `amazon/dynamodb-local`（`-sharedDb` + 永続ボリューム）
+- `minio` + `minio-init`: S3 互換の添付ストア。バケット作成・匿名 download ポリシー・アプリ用ユーザーは `minio-init` が用意
+- TLS はホスト側のリバースプロキシに委譲（`deploy/Caddyfile.example`）。アプリは `127.0.0.1:8080`、MinIO は `127.0.0.1:9000` にのみバインド
+- 認証は実 Cognito。User Pool / App Client（client secret なし、`ALLOW_USER_PASSWORD_AUTH` + `ALLOW_REFRESH_TOKEN_AUTH`）を用意して `.env.production` に設定
+- `AUTH_BACKEND=cognito` のとき、`LEGACY_X_API_KEY` がローカル既定値のままだと起動を拒否します
+
+## 旧データ移行
+
+旧 4 テーブル（`thread` / `log` / `like` / `user`）から single-table へは `scripts/migrate_v2_import.py` を使います。再実行は upsert のため冪等です。
+
+```bash
+# 件数確認（書き込みなし）
+uv run python scripts/migrate_v2_import.py --dry-run --source-profile algon2-prod
+
+# 実行（nRes/nLike を再計算して差分レポート）
+DDB_ENDPOINT_URL=http://localhost:8001 uv run python scripts/migrate_v2_import.py \
+  --source-profile algon2-prod --recompute-counts
+```
+
+S3 資産はキー規約が同じなのでそのままミラーします。
+
+```bash
+aws s3 sync s3://img.algodooonline.net ./assets-dump
+mc mirror ./assets-dump local/algodoo-assets
+```
+
 ## ローカル結合テスト
 
-Docker Compose だけでアプリ、DynamoDB API mock、S3 API mock、結合テスト用コンテナを起動し、テスト終了コードを返します。
+Docker Compose だけでアプリ、DynamoDB API mock、S3 API mock、結合テスト用コンテナを起動し、テスト終了コードを返します。移行スクリプトの結合テストも同じプロファイルで実行されます。
 
 ```bash
 docker compose --profile test up --abort-on-container-exit --exit-code-from integration
@@ -50,6 +86,20 @@ docker compose --profile test up --abort-on-container-exit --exit-code-from inte
 
 ```bash
 sh scripts/test-integration-local.sh
+```
+
+Cognito バックエンドの結合テスト（moto の cognito-idp を利用）:
+
+```bash
+docker compose --profile test-cognito up --abort-on-container-exit --exit-code-from integration-cognito
+```
+
+本番トポロジ（ビルド済みイメージ + DynamoDB Local + MinIO、local 認証）の検証:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.ci up -d --build
+BASE_URL=http://127.0.0.1:8080 ASSET_PUBLIC_BASE_URL=http://localhost:9000/algodoo-assets \
+  S3_INTERNAL_BASE_URL=http://127.0.0.1:9000/algodoo-assets python3 scripts/integration_local.py
 ```
 
 ## 参照元
