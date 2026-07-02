@@ -10,9 +10,13 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -40,9 +44,13 @@ jobs:
   integration:
     name: Docker Compose Integration Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Run local integration test (web + legacy API + migration)
         run: docker compose --profile test up --abort-on-container-exit --exit-code-from integration
@@ -54,9 +62,13 @@ jobs:
   integration-cognito:
     name: Cognito Auth Backend Integration Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Run cognito integration test (moto cognito-idp)
         run: >
@@ -70,9 +82,13 @@ jobs:
   prod-image:
     name: Production Image + Compose Topology Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Build and start the production topology (local auth backend)
         run: docker compose -f docker-compose.prod.yml --env-file .env.ci up -d --build

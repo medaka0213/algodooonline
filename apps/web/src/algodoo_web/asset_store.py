@@ -47,7 +47,11 @@ def asset_s3_client_kwargs() -> dict:
     kwargs: dict = {"region_name": settings.aws_region}
     if settings.asset_s3_endpoint_url:
         kwargs["endpoint_url"] = settings.asset_s3_endpoint_url
-    if settings.asset_s3_access_key_id:
+    if settings.asset_s3_access_key_id or settings.asset_s3_secret_access_key:
+        if not settings.asset_s3_access_key_id or not settings.asset_s3_secret_access_key:
+            raise RuntimeError(
+                "ASSET_S3_ACCESS_KEY_ID and ASSET_S3_SECRET_ACCESS_KEY must be set together"
+            )
         kwargs["aws_access_key_id"] = settings.asset_s3_access_key_id
         kwargs["aws_secret_access_key"] = settings.asset_s3_secret_access_key
     return kwargs

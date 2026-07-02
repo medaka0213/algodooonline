@@ -528,10 +528,19 @@ async def login_submit(request: Request):
             },
             status_code=401,
         )
-    claims = backend.verify_id_token(tokens.id_token) or {
-        "name": tokens.name,
-        "sub": tokens.sub,
-    }
+    claims = backend.verify_id_token(tokens.id_token)
+    if claims is None:
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                **_base_context(request),
+                "page": "login",
+                "v1_username": "",
+                "form_error": "IDトークンを検証できませんでした",
+            },
+            status_code=401,
+        )
     upsert_user_from_claims(claims)
     response = RedirectResponse(url="/", status_code=303)
     return apply_session_cookies(response, tokens)

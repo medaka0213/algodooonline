@@ -209,9 +209,10 @@ class CognitoAuthBackend:
         try:
             response = self._client.initiate_auth(
                 AuthFlow="REFRESH_TOKEN_AUTH",
-                # Secret-bearing clients compute the refresh SECRET_HASH from sub.
+                # SECRET_HASH is HMAC(username + client_id); Cognito's internal
+                # username, not sub, or secret-bearing clients get NotAuthorizedException.
                 AuthParameters=self._with_secret_hash(
-                    {"REFRESH_TOKEN": refresh_token}, sub or username
+                    {"REFRESH_TOKEN": refresh_token}, username or sub
                 ),
                 ClientId=self._settings.cognito_client_id,
             )

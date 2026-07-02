@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import os
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from decimal import Decimal
 
 import boto3
@@ -124,14 +123,17 @@ def map_log(item: dict) -> Log:
     )
 
 
+# The old like table has no created_at; use a fixed placeholder so re-imports
+# stay idempotent (nullable=False on the destination record).
+_UNKNOWN_LIKE_CREATED_AT = "1970-01-01T00:00:00+00:00"
+
+
 def map_like(item: dict) -> Like:
-    # The old like table has no created_at; stamp the import time (nullable=False
-    # on the destination record).
     return Like(
         post_id=str(item["post_id"]),
         user_id=str(item["user_id"]),
         like_type=LikeType(str(item.get("type") or "good")),
-        created_at=str(item.get("created_at") or datetime.now(UTC).isoformat()),
+        created_at=str(item.get("created_at") or _UNKNOWN_LIKE_CREATED_AT),
         is_deleted=bool(item.get("isDeleted")),
     )
 
@@ -157,6 +159,13 @@ _MAPPERS = {
     "user": (map_user, user_to_record),
 }
 
+_SENSITIVE_KEYS = {"v1_password", "email"}
+
+
+def _safe_repr(item: dict) -> str:
+    redacted = {k: ("***" if k in _SENSITIVE_KEYS else v) for k, v in item.items()}
+    return repr(redacted)[:120]
+
 
 def migrate_kind(source_table, kind: str, *, dry_run: bool, limit: int | None) -> dict[str, int]:
     mapper, to_record = _MAPPERS[kind]
@@ -169,7 +178,7 @@ def migrate_kind(source_table, kind: str, *, dry_run: bool, limit: int | None) -
             model = mapper(item)
         except Exception as exc:  # noqa: BLE001 — report and continue
             stats["errors"] += 1
-            print(f"  [error] {kind} {item!r:.120}: {exc}")
+            print(f"  [error] {kind} {_safe_repr(item)}: {exc}")
             continue
         if dry_run:
             continue

@@ -38,7 +38,7 @@
 - DynamoDBのアクセス層は `DynamoDB-SingleTable` を使う。
 - `DynamoDB-SingleTable` は別リポジトリなので、このリポジトリにvendoringしてコミットしない。
 - 旧DynamoDBの4テーブル構成からsingle-tableへ移行できるように、ID・旧v1属性・移行状態を保持する。
-- デプロイ先はAWSサーバーレスかつ従量課金前提にする。
+- デプロイ先は Linux ホスト上の Docker Compose セルフホスト構成にする（詳細は直後の「本番構成」節）。
 - ローカルでは Docker Compose だけで画面・認証代替・DynamoDB互換ストア・APIの結合試験を完結させる。
 
 本番構成は「Linuxホスト上のDocker Composeによるセルフホスト + 実Cognito」を正とする（2026-07 決定）。

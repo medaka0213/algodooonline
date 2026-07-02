@@ -9,6 +9,12 @@ def _env_flag(name: str, default: str = "") -> bool:
     return os.getenv(name, default).lower() in {"1", "true", "yes"}
 
 
+def _env_value(name: str, default: str = "") -> str:
+    """Like os.getenv but keeps an explicitly empty value (only unset uses default)."""
+    value = os.getenv(name)
+    return default if value is None else value.strip()
+
+
 @dataclass(frozen=True)
 class WebSettings:
     app_name: str = os.getenv("APP_NAME", "algodooonline")
@@ -32,9 +38,7 @@ class WebSettings:
     dynamodb_table_name: str = os.getenv("DDB_TABLE_NAME", "algodoo-main")
     # Legacy API expects x-api-key (SPEC §11). Set env to empty to disable (local only).
     legacy_x_api_key: str = field(
-        default_factory=lambda: (
-            os.getenv("LEGACY_X_API_KEY") or DEFAULT_LEGACY_X_API_KEY
-        ).strip()
+        default_factory=lambda: _env_value("LEGACY_X_API_KEY", DEFAULT_LEGACY_X_API_KEY)
     )
     # Optional S3 for IMAGE/DATA (SPEC §575). Empty bucket → local media/ only.
     asset_s3_bucket: str = field(
@@ -82,6 +86,8 @@ def validate_production_settings(settings: WebSettings) -> None:
         problems.append("COGNITO_CLIENT_ID is required")
     if settings.legacy_x_api_key == DEFAULT_LEGACY_X_API_KEY:
         problems.append("LEGACY_X_API_KEY must not keep the local default value")
+    if not settings.cognito_endpoint_url and not settings.cookie_secure:
+        problems.append("COOKIE_SECURE must be true when using real Cognito")
     if problems:
         raise RuntimeError("invalid production settings: " + "; ".join(problems))
 

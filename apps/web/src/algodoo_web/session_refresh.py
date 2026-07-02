@@ -51,6 +51,12 @@ class SessionRefreshMiddleware(BaseHTTPMiddleware):
                             "algodoo_access_exp": tokens.access_exp.isoformat(),
                         },
                     )
+                else:
+                    # The stale/expiring id token must not reach the handler
+                    # (SPEC: refresh happens BEFORE the handler runs).
+                    _rewrite_request_cookies(request, {"algodoo_idtoken": ""})
+                    response = await call_next(request)
+                    return strip_auth_cookies(response)
 
         response = await call_next(request)
         if tokens is not None:

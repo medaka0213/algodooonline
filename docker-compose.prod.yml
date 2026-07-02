@@ -11,6 +11,14 @@ services:
     user: root
     volumes:
       - ddb-data:/home/dynamodblocal/data
+    healthcheck:
+      # DynamoDB Local answers (400 on a bare GET) once it's actually serving;
+      # -f would treat that 400 as failure, so just check curl connects.
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://127.0.0.1:8000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
     restart: unless-stopped
 
   minio:
@@ -26,7 +34,9 @@ services:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      # mc is the maintainer-recommended check: it doesn't depend on curl
+      # being bundled in the image (removed from some MinIO releases).
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 3s
       retries: 12
@@ -50,8 +60,8 @@ services:
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
         mc mb --ignore-existing "local/$$ASSET_S3_BUCKET" &&
         mc anonymous set download "local/$$ASSET_S3_BUCKET" &&
-        (mc admin user add local "$$MINIO_APP_USER" "$$MINIO_APP_PASSWORD" || true) &&
-        (mc admin policy attach local readwrite --user "$$MINIO_APP_USER" || true)
+        mc admin user add local "$$MINIO_APP_USER" "$$MINIO_APP_PASSWORD" &&
+        mc admin policy attach local readwrite --user "$$MINIO_APP_USER"
     restart: "no"
 
   app:
@@ -73,7 +83,7 @@ services:
       - app-media:/app/media
     depends_on:
       dynamodb:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_healthy
       minio-init:

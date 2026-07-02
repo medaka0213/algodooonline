@@ -32,4 +32,4 @@ WORKDIR /app
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=5 \
     CMD ["python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/healthz', timeout=2).read()"]
-CMD ["uvicorn", "algodoo_web.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["sh", "-c", "exec uvicorn algodoo_web.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*' --workers ${WEB_CONCURRENCY:-2}"]

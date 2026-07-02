@@ -490,7 +490,7 @@ def upsert_user_from_claims(claims: dict) -> UserProfile:
         sub=str(claims.get("sub") or (existing.sub if existing else f"local-{username}")),
         email=str(claims.get("email") or (existing.email if existing else "")),
         email_verified=bool(
-            claims.get("email_verified", existing.email_verified if existing else True)
+            claims.get("email_verified", existing.email_verified if existing else False)
         ),
         version="2",
         v1_password=existing.v1_password if existing else None,
