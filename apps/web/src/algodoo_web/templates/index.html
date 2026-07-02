@@ -984,6 +984,24 @@
           if (modal.open && event.target === modal) modal.open = false;
         });
       });
+      function normalizeDataUrlMime(result, filename) {
+        // Browsers derive File.type from the OS mime database by extension;
+        // ".phz"/".phn" are not registered anywhere, so File.type is empty
+        // for them and the server's strict application/zip | text/plain
+        // check on the Data URL rejects every upload. Force the MIME the
+        // server actually expects for these two app-specific extensions.
+        var lower = (filename || "").toLowerCase();
+        var mime = lower.endsWith(".phz")
+          ? "application/zip"
+          : lower.endsWith(".phn")
+            ? "text/plain"
+            : null;
+        if (!mime || typeof result !== "string") return result;
+        var comma = result.indexOf(",");
+        if (comma === -1) return result;
+        var isBase64 = /;base64$/.test(result.slice(5, comma));
+        return "data:" + mime + (isBase64 ? ";base64" : "") + "," + result.slice(comma + 1);
+      }
       document.querySelectorAll("[data-file-input]").forEach(function (input) {
         input.addEventListener("change", function () {
           var target = document.querySelector(input.dataset.fileInput);
@@ -1014,7 +1032,7 @@
                 };
                 img.src = result;
               } else {
-                loaded.push(result);
+                loaded.push(normalizeDataUrlMime(result, file.name));
                 target.value = loaded.join("\n");
                 if (list) list.textContent = names.length + "件: " + names.join(", ");
               }

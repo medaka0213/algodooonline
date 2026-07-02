@@ -59,6 +59,33 @@ jobs:
         if: always()
         run: docker compose down --volumes
 
+  e2e:
+    name: Playwright E2E Test (all legacy screens)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Playwright e2e test
+        run: docker compose --profile e2e up --abort-on-container-exit --exit-code-from e2e
+
+      - name: Upload Playwright artifacts (screenshots/video/trace on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop e2e stack
+        if: always()
+        run: docker compose --profile e2e down --volumes
+
   integration-cognito:
     name: Cognito Auth Backend Integration Test
     runs-on: ubuntu-latest

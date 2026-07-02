@@ -91,6 +91,14 @@ services:
     volumes:
       - .:/app
       - uv-cache:/root/.cache/uv
+    networks:
+      default:
+        aliases:
+          # Chromium hardcodes ".app" as an HSTS-preloaded TLD and forces
+          # https:// for any host literally named "app", breaking the plain
+          # http:// local stack for browser-driven (Playwright) tests. The
+          # `e2e` service targets this alias instead of the service name.
+          - webapp
 
   integration:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
@@ -115,6 +123,28 @@ services:
     volumes:
       - .:/app
       - uv-cache:/root/.cache/uv
+
+  # Playwright browser e2e test covering every legacy screen (SPEC.md) end to end.
+  e2e:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    profiles: ["e2e"]
+    working_dir: /app
+    command: ["sh", "/app/scripts/e2e-local.sh"]
+    # Chromium needs more than the default 64MB /dev/shm or it crashes mid-run.
+    shm_size: "1gb"
+    environment:
+      # Not http://app:8000: Chromium force-upgrades that to https:// (see
+      # the `webapp` alias comment on the `app` service) and the plain HTTP
+      # dev stack has no TLS listener.
+      BASE_URL: http://webapp:8000
+      UV_LINK_MODE: copy
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - uv-cache:/root/.cache/uv
+      - playwright-browsers:/root/.cache/ms-playwright
 
   # Cognito auth backend test: the same moto server also emulates cognito-idp.
   app-cognito:
@@ -172,3 +202,4 @@ services:
 
 volumes:
   uv-cache:
+  playwright-browsers:
