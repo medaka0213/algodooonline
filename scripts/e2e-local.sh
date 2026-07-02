@@ -3,9 +3,14 @@ set -eu
 
 cd /app
 
-# The pinned ddb-single git dependency needs a git executable (bare uv image).
-if ! command -v git >/dev/null 2>&1; then
-  apt-get update -qq && apt-get install -y -qq --no-install-recommends git
+# The pinned ddb-single git dependency needs a git executable (bare uv image),
+# and ffmpeg transcodes Playwright's WebM recordings to MP4 for the HTML
+# report (Playwright's bundled ffmpeg can't mux MP4). Install both in one shot.
+missing=""
+command -v git >/dev/null 2>&1 || missing="$missing git"
+command -v ffmpeg >/dev/null 2>&1 || missing="$missing ffmpeg"
+if [ -n "$missing" ]; then
+  apt-get update -qq && apt-get install -y -qq --no-install-recommends $missing
 fi
 
 uv sync --all-packages --group e2e
