@@ -377,7 +377,9 @@ def _base_context(request: Request) -> dict[str, object]:
 def _build_own_likes(items: list, current_user: dict | None) -> dict[str, dict]:
     if not current_user:
         return {}
-    post_ids = [item.thread_id if hasattr(item, "thread_id") else item.log_id for item in items]
+    # Logs have both `log_id` and `thread_id`; check `log_id` first or every
+    # log's "own like" would be looked up under its parent thread's id.
+    post_ids = [item.log_id if hasattr(item, "log_id") else item.thread_id for item in items]
     return get_own_likes_batch(post_ids, current_user["sub"])
 
 

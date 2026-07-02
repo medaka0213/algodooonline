@@ -19,3 +19,7 @@ apps/web/src/algodoo_web/media/
 .env.production
 .env
 .env.local
+
+# Playwright e2e artifacts (screenshots/video/trace on failure)
+test-results/
+tests/e2e/test-results/

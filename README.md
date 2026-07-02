@@ -102,6 +102,34 @@ BASE_URL=http://127.0.0.1:8080 ASSET_PUBLIC_BASE_URL=http://localhost:9000/algod
   S3_INTERNAL_BASE_URL=http://127.0.0.1:9000/algodoo-assets python3 scripts/integration_local.py
 ```
 
+## Playwright e2e テスト（全画面のブラウザ結合テスト）
+
+`scripts/integration_local.py` はHTTPレベルの結合テストですが、`tests/e2e` は実際の Chromium で SPEC.md の全画面（ホーム・Navbar・認証4画面・掲示板一覧/詳細・投稿/返信/編集/削除・Like・検索/並べ替え・IMAGE/DATA添付・Markdown サニタイズ）を操作して検証します。GitHub Actions でも同じプロファイルを実行します。
+
+```bash
+docker compose --profile e2e up --abort-on-container-exit --exit-code-from e2e
+```
+
+短縮コマンド:
+
+```bash
+sh scripts/test-e2e-local.sh
+```
+
+`app` コンテナに対して素の `uv run pytest` で直接実行したい場合（Playwright ブラウザは別途 `playwright install --with-deps chromium` が必要）:
+
+```bash
+uv sync --all-packages --group e2e
+uv run --group e2e playwright install --with-deps chromium
+BASE_URL=http://localhost:8080 uv run --group e2e pytest tests/e2e
+```
+
+実行後、`test-results/report.html` をブラウザで直接開くとテスト結果（成否・所要時間・失敗時のトレースバック）を一覧で確認できます（`docker compose --profile e2e` 実行時もリポジトリ直下にバインドマウントされるので、コンテナが終了した後にホスト側でそのまま開けます）。失敗したテストのスクリーンショット・動画・trace は同じ `test-results/<テスト名>/` 配下に出力され、trace は次のコマンドでブラウザ操作を録画のように再生しながら確認できます。
+
+```bash
+uv run --group e2e playwright show-trace test-results/<テスト名>/trace.zip
+```
+
 ## 参照元
 
 - APP: `../Algon2-APP`

@@ -38,6 +38,12 @@ Run the local integration test:
 docker compose --profile test up --abort-on-container-exit --exit-code-from integration
 ```
 
+Run the Playwright browser e2e test (every legacy screen, in a real Chromium):
+
+```bash
+docker compose --profile e2e up --abort-on-container-exit --exit-code-from e2e
+```
+
 Syntax check without writing bytecode:
 
 ```bash
@@ -50,6 +56,7 @@ python3 -B -c "import ast, pathlib; [ast.parse(p.read_text()) for p in pathlib.P
 - `packages/domain`: domain dataclasses and enums
 - `packages/data`: DynamoDB single-table models and repository functions
 - `scripts`: local dev and integration test scripts
+- `tests/e2e`: Playwright (pytest-playwright) browser e2e tests covering every legacy screen
 
 ## Development Rules
 
@@ -57,7 +64,7 @@ python3 -B -c "import ast, pathlib; [ast.parse(p.read_text()) for p in pathlib.P
 - Treat `SPEC.md` as the acceptance criteria. Do not replace legacy UI or API behavior with a newly invented product shape unless the spec is updated from the legacy repositories first.
 - Keep the main screen as a usable application screen.
 - Do not add migration notes, schema descriptions, access pattern docs, or architecture explanations to the user-facing app UI.
-- If a feature changes UI behavior, update `scripts/integration_local.py` to cover the expected flow.
+- If a feature changes UI behavior, update `scripts/integration_local.py` to cover the expected flow, and update or add a matching `tests/e2e` Playwright test.
 - Keep data access behind `packages/data/src/algodoo_data/repository.py`.
 - Do not bypass `ddb_single` for normal DynamoDB model operations.
 - Do not vendor or commit `DynamoDB-SingleTable`; keep it as the separate dependency declared in `packages/data/pyproject.toml`.

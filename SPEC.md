@@ -672,6 +672,10 @@ Docker Compose 起動後に、ブラウザまたはHTTPテストだけで以下�
 
 結合テストは `scripts/integration_local.py` で自動化する。画面仕様を変えた場合は同時にこのテストを更新する。
 
+`scripts/integration_local.py` はHTTPレベルの検証であり、実ブラウザでのクリック・入力・EasyMDE・ファイルドロップ・モーダル開閉までは検証しない。上記条件を実ブラウザで確認する自動テストは `tests/e2e`（Playwright/pytest-playwright）に置く。ローカルは `docker compose --profile e2e up --abort-on-container-exit --exit-code-from e2e`、GitHub Actionsも同じプロファイルを実行する。画面仕様を変えた場合は `tests/e2e` も同時に更新する。
+
+**実装進捗（2026-07-02 追記, Playwright e2e）**: `tests/e2e` を追加し、`docker compose --profile e2e` と GitHub Actions の `e2e` ジョブから実行する。実装中に実ブラウザ操作で顕在化した既存バグ2件を修正した。(1) `_build_own_likes`（`apps/web/src/algodoo_web/main.py`）がログの自分のLike状態をスレッドIDで誤って引いており、ログにLikeしても `is-liked` 表示に反映されなかった。(2) DATA投稿のファイル選択で `.phz`/`.phn` はOSのMIMEデータベースに未登録のため `File.type` が空になり、サーバー側の `application/zip`/`text/plain` 判定に必ず失敗していた。クライアント側で拡張子から明示的にMIMEを補正するよう `templates/index.html` を修正した。
+
 ## 18. 現実装との差分
 
 2026-05-04時点で、`../Algon2-APP` と `../Algon2-API` を再確認した結果、このリポジトリ実装にはまだ以下の残件がある。ここには、すでに修正済みのスレッド一覧Likeクリック領域、ログ返信の入れ子表示、返信ログのLike表示、ログ編集・削除ボタンのメニュー外露出は含めない。
