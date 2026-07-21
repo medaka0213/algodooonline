@@ -147,17 +147,21 @@ def normalize_and_persist_filedata(
             out.append(key)
         elif route == LegacyRoute.DATA:
             if mime == "application/zip":
-                if err := validate_phz_bytes(raw):
-                    return [], err
                 # Zip-bomb guard (issue #19): check declared entry counts and
-                # uncompressed sizes before extracting anything.
+                # uncompressed sizes before anything (validate_phz_bytes
+                # included) walks the archive's entries.
                 try:
                     zf = zipfile.ZipFile(io.BytesIO(raw))
                     infos = zf.infolist()
-                    if len(infos) > MAX_PHZ_ENTRIES:
-                        return [], "PHZ contains too many entries"
-                    if sum(info.file_size for info in infos) > MAX_PHZ_TOTAL_UNCOMPRESSED_BYTES:
-                        return [], "PHZ uncompressed size exceeds the limit"
+                except (OSError, zipfile.BadZipFile):
+                    return [], "PHZ is not a valid zip archive"
+                if len(infos) > MAX_PHZ_ENTRIES:
+                    return [], "PHZ contains too many entries"
+                if sum(info.file_size for info in infos) > MAX_PHZ_TOTAL_UNCOMPRESSED_BYTES:
+                    return [], "PHZ uncompressed size exceeds the limit"
+                if err := validate_phz_bytes(raw):
+                    return [], err
+                try:
                     thumb_name = next(n for n in zf.namelist() if n.lower().endswith("thumb.png"))
                     thumb_bytes = zf.read(thumb_name)
                 except (StopIteration, KeyError, OSError, zipfile.BadZipFile):

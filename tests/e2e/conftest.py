@@ -61,7 +61,26 @@ def _guard_base_url() -> None:
     if not raw:
         # Unset means the base_url fixture's http://127.0.0.1:8080 default.
         return
-    host = (urlsplit(raw).hostname or "").lower()
+    # Match browser URL parsing, which urlsplit() does not: browsers normalize
+    # backslashes to slashes and treat userinfo as a spoofing vector, so
+    # `http://evil.example\@localhost` would reach evil.example while urlsplit
+    # reports hostname "localhost". Reject those shapes structurally, and only
+    # ever allow http(s).
+    parts = urlsplit(raw)
+    if "\\" in raw or parts.username is not None or parts.password is not None:
+        pytest.exit(
+            f"Refusing to run e2e tests against BASE_URL={raw!r}: backslashes or "
+            "userinfo credentials in the URL parse differently in browsers than "
+            "in Python and can smuggle a non-local host past the allowlist.",
+            returncode=2,
+        )
+    if parts.scheme not in {"http", "https"}:
+        pytest.exit(
+            f"Refusing to run e2e tests against BASE_URL={raw!r}: only http/https "
+            "schemes are supported.",
+            returncode=2,
+        )
+    host = (parts.hostname or "").lower()
     allowed = set(_ALLOWED_BASE_URL_HOSTS)
     extra = os.environ.get("E2E_ALLOW_HOST")
     if extra:

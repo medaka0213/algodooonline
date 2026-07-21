@@ -468,6 +468,11 @@ def main() -> None:
         raise AssertionError("expired local token must be rejected")
     except HTTPError as exc:
         assert exc.code == 401, f"expected 401 for expired token, got {exc.code}"
+    try:
+        api("POST", "/user/update", {"submition": {"idToken": "local-token-api-user"}})
+        raise AssertionError("legacy no-expiry local token must be rejected")
+    except HTTPError as exc:
+        assert exc.code == 401, f"expected 401 for legacy token, got {exc.code}"
 
     print("integration ok")
 
