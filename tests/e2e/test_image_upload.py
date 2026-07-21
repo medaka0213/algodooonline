@@ -42,6 +42,8 @@ def test_image_form_shows_thumbnail_preview_instead_of_raw_data_url(
     # The filedata textarea is only a Data URL transport on upload boards;
     # the drop zone shows thumbnails instead.
     expect(form.locator('textarea[name="filedata"]')).to_be_hidden()
+    # The preview box stays hidden (`:empty`) until something is selected.
+    expect(form.locator(".file-preview")).to_be_hidden()
     form.locator('input[type="file"]').set_input_files(
         [str(make_png(tmp_path)), str(make_png(tmp_path, "second.png"))]
     )

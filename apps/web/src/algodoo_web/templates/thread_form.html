@@ -28,10 +28,8 @@
       <div id="file-list-{{ target_thread.thread_id if target_thread else 'new' }}">
         {% if target_thread and target_thread.filedata %}{{ target_thread.filedata|length }}件: {{ target_thread.filedata|join(", ") }}{% endif %}
       </div>
-      <div class="file-preview" id="file-preview-{{ target_thread.thread_id if target_thread else 'new' }}" data-preview-source="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}">
-        {# Edit form: IMAGE keys are the images themselves, DATA phz uploads carry an extracted *_thumb.png key. #}
-        {% if target_thread %}{% for file in target_thread.filedata %}{% if (active_route.value == "IMAGE" and file|is_image) or (active_route.value == "DATA" and file|is_thumb) %}<img src="{{ file|media_url }}" alt="preview" />{% endif %}{% endfor %}{% endif %}
-      </div>
+      {# Kept whitespace-free inside so the `.file-preview:empty` CSS rule can hide it. #}
+      <div class="file-preview" id="file-preview-{{ target_thread.thread_id if target_thread else 'new' }}" data-preview-source="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}">{% if target_thread %}{% for file in target_thread.filedata %}{% if (active_route.value == "IMAGE" and file|is_image) or (active_route.value == "DATA" and file|is_thumb) %}<img src="{{ file|media_url }}" alt="preview" />{% endif %}{% endfor %}{% endif %}</div>
     </div>
   </div>
   {% endif %}

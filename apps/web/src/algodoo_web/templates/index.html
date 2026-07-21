@@ -1069,39 +1069,52 @@
       }
       function extractZipEntry(bytes, name) {
         // Minimal ZIP reader — just enough to pull thumb.png out of a .phz
-        // for the upload preview (stored and deflate entries only).
-        var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        var i = bytes.byteLength - 22;
-        while (i >= 0 && view.getUint32(i, true) !== 0x06054b50) i--;
-        if (i < 0) return Promise.resolve(null);
-        var count = view.getUint16(i + 10, true);
-        var p = view.getUint32(i + 16, true);
-        for (var j = 0; j < count; j++) {
-          if (view.getUint32(p, true) !== 0x02014b50) break;
-          var method = view.getUint16(p + 10, true);
-          var compSize = view.getUint32(p + 20, true);
-          var nameLen = view.getUint16(p + 28, true);
-          var extraLen = view.getUint16(p + 30, true);
-          var commentLen = view.getUint16(p + 32, true);
-          var localOffset = view.getUint32(p + 42, true);
-          var entryName = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
-          if (entryName === name) {
-            var dataStart =
-              localOffset + 30 + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
-            var comp = bytes.subarray(dataStart, dataStart + compSize);
-            if (method === 0) return Promise.resolve(comp);
-            if (method !== 8 || typeof DecompressionStream === "undefined") return Promise.resolve(null);
-            var stream = new Blob([comp]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-            return new Response(stream).arrayBuffer().then(function (buf) {
-              return new Uint8Array(buf);
-            });
+        // for the upload preview (stored and deflate entries only). Resolves
+        // null for anything it can't read (truncated archive, unsupported
+        // method, no DecompressionStream) instead of throwing.
+        try {
+          var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          var i = bytes.byteLength - 22;
+          while (i >= 0 && view.getUint32(i, true) !== 0x06054b50) i--;
+          if (i < 0) return Promise.resolve(null);
+          var count = view.getUint16(i + 10, true);
+          var p = view.getUint32(i + 16, true);
+          for (var j = 0; j < count; j++) {
+            if (view.getUint32(p, true) !== 0x02014b50) break;
+            var method = view.getUint16(p + 10, true);
+            var compSize = view.getUint32(p + 20, true);
+            var nameLen = view.getUint16(p + 28, true);
+            var extraLen = view.getUint16(p + 30, true);
+            var commentLen = view.getUint16(p + 32, true);
+            var localOffset = view.getUint32(p + 42, true);
+            var entryName = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
+            if (entryName === name) {
+              var dataStart =
+                localOffset + 30 + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
+              var comp = bytes.subarray(dataStart, dataStart + compSize);
+              if (method === 0) return Promise.resolve(comp);
+              if (method !== 8 || typeof DecompressionStream === "undefined") return Promise.resolve(null);
+              var stream = new Blob([comp]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+              return new Response(stream)
+                .arrayBuffer()
+                .then(function (buf) {
+                  return new Uint8Array(buf);
+                })
+                .catch(function () {
+                  return null;
+                });
+            }
+            p += 46 + nameLen + extraLen + commentLen;
           }
-          p += 46 + nameLen + extraLen + commentLen;
-        }
+        } catch (e) {}
         return Promise.resolve(null);
       }
       function renderFilePreview(preview, values) {
         if (!preview) return;
+        (preview._blobUrls || []).forEach(function (url) {
+          URL.revokeObjectURL(url);
+        });
+        preview._blobUrls = [];
         preview.textContent = "";
         values.forEach(function (value) {
           if (typeof value !== "string") return;
@@ -1129,6 +1142,7 @@
             .then(function (data) {
               if (data && data.length) {
                 thumb.src = URL.createObjectURL(new Blob([data], { type: "image/png" }));
+                preview._blobUrls.push(thumb.src);
               } else {
                 thumb.remove();
               }
@@ -1183,11 +1197,18 @@
       });
       // After a server-side validation error the Data URLs come back in the
       // (hidden) filedata textarea; rebuild the thumbnails from it on load.
+      // Rebuild only when the textarea holds Data URLs (a fresh selection):
+      // an unchanged edit form round-trips stored keys, and those previews
+      // are already server-rendered — clearing them here would lose them.
       document.querySelectorAll("[data-preview-source]").forEach(function (preview) {
-        if (preview.childElementCount) return;
         var source = document.querySelector(preview.dataset.previewSource);
         if (!source || !source.value) return;
-        renderFilePreview(preview, source.value.split("\n"));
+        var values = source.value.split("\n");
+        var hasDataUrl = values.some(function (value) {
+          return value.indexOf("data:") === 0;
+        });
+        if (!hasDataUrl) return;
+        renderFilePreview(preview, values);
       });
       (function () {
         var root = document.getElementById("image-slideshow");
