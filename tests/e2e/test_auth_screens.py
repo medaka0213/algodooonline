@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from auth import login
+from auth import TEST_PASSWORD, generate_password, login
 from playwright.sync_api import Page, expect
 
 
@@ -34,8 +34,9 @@ def test_signup_screen_register_step(page: Page, username: str) -> None:
     expect(card.locator("h1")).to_have_text("アカウントを新規作成")
     card.get_by_label("ユーザー名").fill(username)
     card.get_by_label("メールアドレス").fill(f"{username}@example.com")
-    card.get_by_label("パスワード", exact=True).fill("password123")
-    card.get_by_label("パスワード(確認用)").fill("password123")
+    password = generate_password()
+    card.get_by_label("パスワード", exact=True).fill(password)
+    card.get_by_label("パスワード(確認用)").fill(password)
     card.get_by_role("button", name="仮登録する(検証コード送信)").click()
 
     expect(card).to_contain_text(
@@ -44,6 +45,9 @@ def test_signup_screen_register_step(page: Page, username: str) -> None:
     expect(card.get_by_label("ユーザー名")).to_have_value(username)
     # The field is `readonly`, not `disabled` (SPEC §5.3 fixes the username).
     expect(card.get_by_label("ユーザー名")).not_to_be_editable()
+    # Fixed code "123456" only works against the local/moto test backends,
+    # which accept any code; the BASE_URL allowlist guard in conftest.py
+    # prevents this suite from ever running against a real deployment.
     card.get_by_label("確認コード").fill("123456")
     card.get_by_role("button", name="本登録").click()
 
@@ -88,9 +92,10 @@ def test_changepass_screen_success(page: Page, username: str) -> None:
     card = page.locator("section.auth-card")
     expect(card.locator("h1")).to_have_text("パスワードを変更する")
     expect(card.get_by_label("ユーザー名")).to_have_value(username)
-    card.get_by_label("パスワード", exact=True).fill("password123")
-    card.get_by_label("新しいパスワード", exact=True).fill("newpassword123")
-    card.get_by_label("新しいパスワード (確認用)").fill("newpassword123")
+    new_password = generate_password()
+    card.get_by_label("パスワード", exact=True).fill(TEST_PASSWORD)
+    card.get_by_label("新しいパスワード", exact=True).fill(new_password)
+    card.get_by_label("新しいパスワード (確認用)").fill(new_password)
     card.get_by_role("button", name="パスワードを変更").click()
 
     assert re.sub(r"^https?://[^/]+", "", page.url) == "/"
@@ -100,8 +105,8 @@ def test_changepass_mismatch_shows_form_error(page: Page, username: str) -> None
     login(page, username)
     page.goto("/auth/changepass")
     card = page.locator("section.auth-card")
-    card.get_by_label("パスワード", exact=True).fill("password123")
-    card.get_by_label("新しいパスワード", exact=True).fill("newpassword123")
+    card.get_by_label("パスワード", exact=True).fill(TEST_PASSWORD)
+    card.get_by_label("新しいパスワード", exact=True).fill(generate_password())
     card.get_by_label("新しいパスワード (確認用)").fill("doesnotmatch")
     card.get_by_role("button", name="パスワードを変更").click()
 
@@ -118,9 +123,13 @@ def test_forgotpass_screen_flow(page: Page, username: str) -> None:
     expect(card).to_contain_text(
         "メールアドレスに送信された検証コードを入力して、パスワードを回復してください"
     )
+    # Fixed code: accepted only by the local/moto test backends (see the
+    # signup test above); the conftest BASE_URL guard keeps this off real
+    # deployments.
     card.get_by_label("検証コード").fill("123456")
-    card.get_by_label("新しいパスワード", exact=True).fill("newpassword123")
-    card.get_by_label("新しいパスワード(確認用)").fill("newpassword123")
+    new_password = generate_password()
+    card.get_by_label("新しいパスワード", exact=True).fill(new_password)
+    card.get_by_label("新しいパスワード(確認用)").fill(new_password)
     card.get_by_role("button", name="パスワードを変更する").click()
 
     assert re.sub(r"^https?://[^/]+", "", page.url) == "/"
@@ -133,7 +142,7 @@ def test_forgotpass_recovery_mismatch_shows_form_error(page: Page, username: str
     card.get_by_role("button", name="検証コードを送る").click()
 
     card.get_by_label("検証コード").fill("123456")
-    card.get_by_label("新しいパスワード", exact=True).fill("newpassword123")
+    card.get_by_label("新しいパスワード", exact=True).fill(generate_password())
     card.get_by_label("新しいパスワード(確認用)").fill("doesnotmatch")
     card.get_by_role("button", name="パスワードを変更する").click()
 

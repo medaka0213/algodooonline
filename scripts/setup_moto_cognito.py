@@ -8,6 +8,26 @@ import os
 
 import boto3
 
+# =============================================================================
+# WARNING — MOTO TEST-ONLY PASSWORD POLICY (OWASP A07, issue #24)
+#
+# This deliberately weak policy (8 chars, no complexity requirements) exists
+# ONLY so local moto-based integration tests can create throwaway users with
+# simple fixture passwords. It must NEVER be copied to a real Cognito user
+# pool. Production pools must enforce a strong policy (length >= 12, upper/
+# lowercase, numbers, symbols) and should be provisioned via IaC, not this
+# script.
+# =============================================================================
+_MOTO_TEST_ONLY_PASSWORD_POLICY = {
+    "PasswordPolicy": {
+        "MinimumLength": 8,
+        "RequireUppercase": False,
+        "RequireLowercase": False,
+        "RequireNumbers": False,
+        "RequireSymbols": False,
+    }
+}
+
 
 def main() -> None:
     endpoint = os.environ["COGNITO_ENDPOINT_URL"]
@@ -25,15 +45,9 @@ def main() -> None:
         pool_id = client.create_user_pool(
             PoolName="algodoo-test",
             AutoVerifiedAttributes=["email"],
-            Policies={
-                "PasswordPolicy": {
-                    "MinimumLength": 8,
-                    "RequireUppercase": False,
-                    "RequireLowercase": False,
-                    "RequireNumbers": False,
-                    "RequireSymbols": False,
-                }
-            },
+            # Test-only weak policy — see warning block above. Never use for a
+            # real user pool.
+            Policies=_MOTO_TEST_ONLY_PASSWORD_POLICY,
         )["UserPool"]["Id"]
     clients = client.list_user_pool_clients(UserPoolId=pool_id, MaxResults=10).get(
         "UserPoolClients", []

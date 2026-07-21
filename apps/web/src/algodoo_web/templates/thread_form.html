@@ -33,7 +33,9 @@
   {% endif %}
   <div class="form-group">
     <label>filedata
-      <textarea class="form-control" id="filedata-{{ target_thread.thread_id if target_thread else 'new' }}" name="filedata">{% if preset_filedata is not none %}{{ preset_filedata }}{% elif target_thread %}{% for file in target_thread.filedata %}{{ file }}
+      {# maxlength tracks the 20MB request-body cap (MAX_REQUEST_BODY_BYTES in main.py, issue #19);
+         each individual data URL is further capped at MAX_UPLOAD_BYTES (10MB) in algodoo_data/uploads.py. #}
+      <textarea class="form-control" id="filedata-{{ target_thread.thread_id if target_thread else 'new' }}" name="filedata" maxlength="20000000">{% if preset_filedata is not none %}{{ preset_filedata }}{% elif target_thread %}{% for file in target_thread.filedata %}{{ file }}
 {% endfor %}{% endif %}</textarea>
     </label>
   </div>

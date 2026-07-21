@@ -7,6 +7,7 @@ import pathlib
 import secrets
 import shutil
 import subprocess
+from urllib.parse import urlsplit
 
 import pytest
 import pytest_html
@@ -23,6 +24,57 @@ _run_id = secrets.token_hex(3)
 
 _FFMPEG = shutil.which("ffmpeg")
 _SCREENSHOT_KEY = pytest.StashKey[bytes]()
+
+# [A07] Hosts this suite may ever be pointed at. The tests create users, log
+# in with throwaway credentials and mutate data, so they must never run
+# against a real deployment. "app"/"webapp" are the docker-compose service
+# name and its network alias (see docker-compose.yml: Chromium force-upgrades
+# a host literally named "app" to https, hence the "webapp" alias).
+_ALLOWED_BASE_URL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "app", "webapp"})
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # Video recording is opt-in: pytest.ini defaults to retain-on-failure so
+    # passing runs don't embed recordings of auth screens (typed usernames,
+    # signup flows) into the self-contained report.html CI artifact. Set
+    # E2E_VIDEO=on|off|retain-on-failure to override without editing
+    # pytest.ini; an explicit --video on the CLI is clobbered only when the
+    # env var is set.
+    video = os.environ.get("E2E_VIDEO")
+    if video:
+        config.option.video = video
+
+    _guard_base_url()
+
+
+def _guard_base_url() -> None:
+    """Fail fast unless BASE_URL points at a known local/compose host.
+
+    Override hatches for intentional non-local runs:
+    - E2E_ALLOW_HOST: comma-separated extra hostnames to allow.
+    - E2E_ALLOW_UNSAFE_BASE_URL=1: skip the guard entirely.
+    Public (e.g. https) domains are never allowed silently.
+    """
+    if os.environ.get("E2E_ALLOW_UNSAFE_BASE_URL") == "1":
+        return
+    raw = os.environ.get("BASE_URL")
+    if not raw:
+        # Unset means the base_url fixture's http://127.0.0.1:8080 default.
+        return
+    host = (urlsplit(raw).hostname or "").lower()
+    allowed = set(_ALLOWED_BASE_URL_HOSTS)
+    extra = os.environ.get("E2E_ALLOW_HOST")
+    if extra:
+        allowed.update(h.strip().lower() for h in extra.split(",") if h.strip())
+    if host not in allowed:
+        pytest.exit(
+            f"Refusing to run e2e tests against BASE_URL={raw!r}: host {host!r} is not "
+            f"in the local allowlist {sorted(_ALLOWED_BASE_URL_HOSTS)}. These tests "
+            "create users and mutate data and must not target real deployments. "
+            "For an intentional non-local run set E2E_ALLOW_HOST=<host> (comma-"
+            "separated) or E2E_ALLOW_UNSAFE_BASE_URL=1.",
+            returncode=2,
+        )
 
 
 @pytest.hookimpl(tryfirst=True)

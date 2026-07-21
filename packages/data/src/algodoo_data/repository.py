@@ -1,4 +1,7 @@
+import base64
 import hashlib
+import hmac
+import secrets
 import time
 from collections import Counter
 from datetime import UTC, datetime
@@ -20,6 +23,70 @@ from algodoo_data.single_table import (
     thread_to_record,
     user_to_record,
 )
+
+# --- v1 legacy password hashing (OWASP A02, issue #9) -----------------------
+# New self-describing format: scrypt$<n>$<r>$<p>$<salt_b64>$<hash_b64>
+# Legacy v1 records hold a bare unsalted sha512 hexdigest; those are verified
+# once and transparently re-hashed to the new format on successful signin.
+_SCRYPT_N = 2**14
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SCRYPT_DKLEN = 64
+_SALT_BYTES = 16
+_MODERN_HASH_PREFIX = "scrypt$"
+
+
+def hash_v1_password(password: str) -> str:
+    """Hash a password with salted scrypt in the self-describing storage format."""
+    salt = secrets.token_bytes(_SALT_BYTES)
+    digest = hashlib.scrypt(
+        password.encode(),
+        salt=salt,
+        n=_SCRYPT_N,
+        r=_SCRYPT_R,
+        p=_SCRYPT_P,
+        dklen=_SCRYPT_DKLEN,
+    )
+    salt_b64 = base64.b64encode(salt).decode()
+    hash_b64 = base64.b64encode(digest).decode()
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt_b64}${hash_b64}"
+
+
+def is_modern_password_hash(stored: str | None) -> bool:
+    return bool(stored) and str(stored).startswith(_MODERN_HASH_PREFIX)
+
+
+def _verify_modern_hash(password: str, stored: str) -> bool:
+    try:
+        _scheme, n_str, r_str, p_str, salt_b64, hash_b64 = stored.split("$")
+        salt = base64.b64decode(salt_b64)
+        expected = base64.b64decode(hash_b64)
+        digest = hashlib.scrypt(
+            password.encode(),
+            salt=salt,
+            n=int(n_str),
+            r=int(r_str),
+            p=int(p_str),
+            dklen=len(expected),
+        )
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(digest, expected)
+
+
+def _verify_legacy_sha512(password: str, stored: str) -> bool:
+    digest = hashlib.sha512(password.encode()).hexdigest()
+    return hmac.compare_digest(digest.encode(), stored.encode())
+
+
+def verify_v1_password(password: str, stored: str | None) -> bool:
+    """Timing-safe verification supporting both the new scrypt and legacy formats."""
+    if not stored:
+        return False
+    if is_modern_password_hash(stored):
+        return _verify_modern_hash(password, stored)
+    return _verify_legacy_sha512(password, stored)
+
 
 SORT_KEYS = {
     "NEWEST_UPDATED",
@@ -475,8 +542,13 @@ def signin_user(username: str, password: str) -> dict[str, bool]:
     if user is None:
         return {"result": True, "isV2": True, "isV1": False}
     if user.version == "1" or user.v1_password:
-        digest = hashlib.sha512(password.encode()).hexdigest()
-        return {"result": True, "isV2": False, "isV1": user.v1_password == digest}
+        ok = verify_v1_password(password, user.v1_password)
+        if ok and not is_modern_password_hash(user.v1_password):
+            # Upgrade-on-login: replace the legacy unsalted sha512 digest with
+            # a salted scrypt hash so legacy digests are progressively removed.
+            user.v1_password = hash_v1_password(password)
+            query().model(user_to_record(user)).update()
+        return {"result": True, "isV2": False, "isV1": ok}
     return {"result": True, "isV2": True, "isV1": False}
 
 

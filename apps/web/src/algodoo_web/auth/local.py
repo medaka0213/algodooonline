@@ -1,5 +1,8 @@
 """Pseudo-session backend for compose/dev/CI. Keeps the pre-Cognito behavior:
-no password checks, tokens are plain `local-token-{username}` strings."""
+no password checks. Tokens are plain `local-token-{username}-e{unix_expiry}`
+strings; the `-e...` suffix gives them a real expiry so a captured token (e.g.
+sent via the Authorization header, which skips the cookie refresh logic) does
+not stay valid forever. Tokens without an expiry suffix are rejected."""
 
 from __future__ import annotations
 
@@ -12,19 +15,20 @@ from algodoo_web.auth.base import SessionTokens
 
 _TOKEN_PREFIX = "local-token-"
 _REFRESH_PREFIX = "local-refresh-"
-_ROTATION_SUFFIX = re.compile(r"-r\d+$")
+_EXPIRY_SUFFIX = re.compile(r"-e(\d{1,12})$")
 
 ACCESS_TTL = timedelta(minutes=15)
 REFRESH_TTL = timedelta(days=30)
 
 
 class LocalAuthBackend:
-    def _tokens(self, username: str, sub: str) -> SessionTokens:
+    def _tokens(self, username: str, sub: str, refresh_token: str | None = None) -> SessionTokens:
         now = datetime.now(UTC)
+        access_exp = now + ACCESS_TTL
         return SessionTokens(
-            id_token=f"{_TOKEN_PREFIX}{username}",
-            refresh_token=f"{_REFRESH_PREFIX}{username}",
-            access_exp=now + ACCESS_TTL,
+            id_token=f"{_TOKEN_PREFIX}{username}-e{int(access_exp.timestamp())}",
+            refresh_token=refresh_token or f"{_REFRESH_PREFIX}{username}",
+            access_exp=access_exp,
             refresh_exp=now + REFRESH_TTL,
             name=username,
             sub=sub,
@@ -62,20 +66,20 @@ class LocalAuthBackend:
     def refresh(self, refresh_token: str, username: str, sub: str) -> SessionTokens | None:
         if not refresh_token.startswith(_REFRESH_PREFIX) or not username:
             return None
-        now = datetime.now(UTC)
-        return SessionTokens(
-            id_token=f"{_TOKEN_PREFIX}{username}-r{int(now.timestamp())}",
-            refresh_token=refresh_token,
-            access_exp=now + ACCESS_TTL,
-            refresh_exp=now + REFRESH_TTL,
-            name=username,
-            sub=sub or f"local-{username}",
-        )
+        return self._tokens(username, sub or f"local-{username}", refresh_token=refresh_token)
 
     def verify_id_token(self, token: str) -> dict | None:
         if not token.startswith(_TOKEN_PREFIX):
             return None
-        username = _ROTATION_SUFFIX.sub("", token.removeprefix(_TOKEN_PREFIX)) or "anonymous"
+        body = token.removeprefix(_TOKEN_PREFIX)
+        match = _EXPIRY_SUFFIX.search(body)
+        if match is None:
+            # Legacy `local-token-{username}` tokens carry no expiry: reject them
+            # so header-supplied local tokens cannot be valid forever.
+            return None
+        if int(match.group(1)) <= datetime.now(UTC).timestamp():
+            return None
+        username = body[: match.start()] or "anonymous"
         user = get_user(username)
         sub = user.sub if user else f"local-{username}"
         email = user.email if user else f"{username}@local.invalid"

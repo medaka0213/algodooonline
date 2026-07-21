@@ -2,13 +2,26 @@
 #   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 # TLS termination belongs to a host-level reverse proxy (see deploy/Caddyfile.example).
 services:
+  # =========================================================================
+  # WARNING (OWASP A05): DynamoDB Local is a development-grade, single-file,
+  # UNAUTHENTICATED database. It is a stopgap for this self-hosted topology:
+  # it accepts any AWS-shaped credentials and has no access control, backup,
+  # or durability story. It is only tolerable here because it is confined to
+  # the compose-internal network (no host ports at all). Real production data
+  # must live in real AWS DynamoDB (drop DDB_ENDPOINT_URL and supply real AWS
+  # credentials) or another authenticated, durable database.
+  # =========================================================================
   dynamodb:
     image: amazon/dynamodb-local:2.5.2
     command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
     working_dir: /home/dynamodblocal
-    # The named volume is created root-owned; the image's default user cannot
-    # open its sqlite file there.
-    user: root
+    # Least privilege: run as the image's unprivileged default user
+    # (dynamodblocal, uid/gid 1000). The dynamodb-init one-shot below fixes
+    # the named volume's root ownership so this user can open its sqlite file.
+    user: "1000:1000"
+    depends_on:
+      dynamodb-init:
+        condition: service_completed_successfully
     volumes:
       - ddb-data:/home/dynamodblocal/data
     healthcheck:
@@ -20,6 +33,16 @@ services:
       retries: 24
       start_period: 10s
     restart: unless-stopped
+
+  # One-shot: hand the root-owned named volume to the unprivileged user that
+  # the dynamodb service runs as. Root is confined to this short-lived chown.
+  dynamodb-init:
+    image: amazon/dynamodb-local:2.5.2
+    user: root
+    entrypoint: ["/bin/sh", "-c", "chown -R 1000:1000 /home/dynamodblocal/data"]
+    volumes:
+      - ddb-data:/home/dynamodblocal/data
+    restart: "no"
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
@@ -55,11 +78,21 @@ services:
       MINIO_APP_PASSWORD: ${MINIO_APP_PASSWORD:?set in .env.production}
       ASSET_S3_BUCKET: ${ASSET_S3_BUCKET:-algodoo-assets}
     entrypoint: ["/bin/sh", "-c"]
+    # Anonymous download is a deliberate decision: this bucket serves ONLY
+    # public assets (legacy board attachments), and every key the app writes
+    # lives under the IMAGE/ (images) or DATA/ (.phz/.phn scenes + thumbnails)
+    # prefixes — see packages/data/src/algodoo_data/uploads.py. The anonymous
+    # policy is scoped to exactly those prefixes so nothing else ever becomes
+    # publicly readable. Any future private data needs a separate bucket (or
+    # presigned URLs), never this one. If upgrading an existing deployment
+    # that had the old bucket-wide policy, clear it once with:
+    #   mc anonymous set none local/<bucket>
     command:
       - >
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
         mc mb --ignore-existing "local/$$ASSET_S3_BUCKET" &&
-        mc anonymous set download "local/$$ASSET_S3_BUCKET" &&
+        mc anonymous set download "local/$$ASSET_S3_BUCKET/IMAGE" &&
+        mc anonymous set download "local/$$ASSET_S3_BUCKET/DATA" &&
         mc admin user add local "$$MINIO_APP_USER" "$$MINIO_APP_PASSWORD" &&
         mc admin policy attach local readwrite --user "$$MINIO_APP_USER"
     restart: "no"
@@ -69,6 +102,9 @@ services:
     env_file:
       - ${APP_ENV_FILE:-.env.production}
     environment:
+      # Strict production startup checks (refuse local auth / default API key /
+      # insecure cookies). CI overrides this via --env-file .env.ci (APP_ENV=ci).
+      APP_ENV: ${APP_ENV:-production}
       DDB_ENDPOINT_URL: http://dynamodb:8000
       ASSET_S3_ENDPOINT_URL: http://minio:9000
       # DynamoDB Local validates the access-key format, so it gets an AWS-shaped
@@ -77,6 +113,11 @@ services:
       AWS_SECRET_ACCESS_KEY: localddbsecret
       ASSET_S3_ACCESS_KEY_ID: ${MINIO_APP_USER:?set in .env.production}
       ASSET_S3_SECRET_ACCESS_KEY: ${MINIO_APP_PASSWORD:?set in .env.production}
+      # Trust X-Forwarded-* only from the compose network gateway: the host
+      # reverse proxy (Caddy) reaches the loopback-published port through
+      # docker's NAT, so its connections appear to come from the gateway of
+      # the pinned subnet below. Never widen this to '*'.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.28.0.1}
     ports:
       - "127.0.0.1:8080:8000"
     volumes:
@@ -94,3 +135,13 @@ volumes:
   ddb-data:
   minio-data:
   app-media:
+
+networks:
+  # Pinned so the gateway address is deterministic and FORWARDED_ALLOW_IPS can
+  # trust exactly the host-side reverse proxy's source address. Override both
+  # values together if 172.28.0.0/24 collides with an existing network.
+  default:
+    ipam:
+      config:
+        - subnet: ${COMPOSE_NETWORK_SUBNET:-172.28.0.0/24}
+          gateway: ${COMPOSE_NETWORK_GATEWAY:-172.28.0.1}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, Request
@@ -16,7 +17,7 @@ def require_configured_api_key(request: Request) -> None:
     if not expected:
         return
     incoming = (request.headers.get("x-api-key") or request.headers.get("X-Api-Key") or "").strip()
-    if incoming != expected:
+    if not hmac.compare_digest(incoming.encode(), expected.encode()):
         raise HTTPException(status_code=403, detail="invalid x-api-key")
 
 

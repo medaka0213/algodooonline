@@ -10,10 +10,14 @@ Destination: the single table configured through the usual env vars
 ddb_single models the app uses. Original IDs, timestamps, and v1_* attributes
 are preserved; re-running the import upserts by ID and stays idempotent.
 
+The script runs in DRY-RUN mode by default (scan + map, no writes). Pass
+--apply to actually write; applying prompts for interactive confirmation
+unless --yes is given (for CI).
+
 Examples:
-    uv run python scripts/migrate_v2_import.py --dry-run \
-        --source-profile algon2-prod
     uv run python scripts/migrate_v2_import.py \
+        --source-profile algon2-prod
+    uv run python scripts/migrate_v2_import.py --apply --yes \
         --source-endpoint-url http://localhost:8001 --recompute-counts
 
 S3 assets are migrated separately (keys are unchanged):
@@ -34,7 +38,9 @@ from algodoo_data.repository import (
     _persist_thread_counts,
     get_log,
     get_thread,
+    get_user,
     init_table,
+    is_modern_password_hash,
     list_threads,
     query,
 )
@@ -181,7 +187,18 @@ def migrate_kind(source_table, kind: str, *, dry_run: bool, limit: int | None) -
             print(f"  [error] {kind} {_safe_repr(item)}: {exc}")
             continue
         if dry_run:
+            print(f"  [dry-run] would write {kind} {_safe_repr(item)}")
             continue
+        if kind == "user":
+            # Never downgrade a v1_password already upgraded to the salted
+            # scrypt format (upgrade-on-login) back to a legacy sha512 digest.
+            existing = get_user(model.username)
+            if (
+                existing is not None
+                and is_modern_password_hash(existing.v1_password)
+                and not is_modern_password_hash(model.v1_password)
+            ):
+                model.v1_password = existing.v1_password
         query().model(to_record(model)).update()
         stats["written"] += 1
     return stats
@@ -228,7 +245,23 @@ def main() -> None:
     parser.add_argument("--source-profile", default=os.getenv("SOURCE_AWS_PROFILE", ""))
     parser.add_argument("--table-suffix", default="", help='old table suffix, e.g. "_test"')
     parser.add_argument("--only", action="append", choices=KINDS, help="restrict imported kinds")
-    parser.add_argument("--dry-run", action="store_true", help="scan and map, write nothing")
+    parser.add_argument(
+        "--apply",
+        "--execute",
+        dest="apply",
+        action="store_true",
+        help="actually write to the destination table (default is dry-run)",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the interactive confirmation when applying (for CI)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="scan and map, write nothing (this is the default; overrides --apply)",
+    )
     parser.add_argument("--limit", type=int, default=None, help="max items per kind")
     parser.add_argument(
         "--recompute-counts",
@@ -236,6 +269,28 @@ def main() -> None:
         help="recalculate nRes/nLike after import instead of trusting source values",
     )
     args = parser.parse_args()
+
+    # Safety default (issue #29): never write unless --apply was given
+    # explicitly, and --dry-run always wins.
+    dry_run = args.dry_run or not args.apply
+    destination_table = os.getenv("DDB_TABLE_NAME", "algodoo-main")
+    source_desc = (
+        args.source_endpoint_url
+        or (f"profile {args.source_profile}" if args.source_profile else "ambient AWS credentials")
+    )
+    if not dry_run:
+        print(f"source:      {source_desc} (region {args.source_region})")
+        print(f"destination: DynamoDB table {destination_table!r}")
+        if not args.yes:
+            try:
+                answer = input("Type 'yes' to write to the destination table: ")
+            except EOFError:
+                answer = ""
+            if answer.strip().lower() != "yes":
+                print("aborted (no writes performed)")
+                return
+    else:
+        print("dry-run mode: no writes will be performed (pass --apply to write)")
 
     session_kwargs = {"region_name": args.source_region}
     if args.source_profile:
@@ -246,20 +301,20 @@ def main() -> None:
         resource_kwargs["endpoint_url"] = args.source_endpoint_url
     source = session.resource("dynamodb", **resource_kwargs)
 
-    if not args.dry_run:
+    if not dry_run:
         init_table()
 
     kinds = [kind for kind in KINDS if not args.only or kind in args.only]
     for kind in kinds:
         table = source.Table(f"{kind}{args.table_suffix}")
-        stats = migrate_kind(table, kind, dry_run=args.dry_run, limit=args.limit)
-        mode = "dry-run" if args.dry_run else "imported"
+        stats = migrate_kind(table, kind, dry_run=dry_run, limit=args.limit)
+        mode = "dry-run" if dry_run else "imported"
         print(
             f"{kind}: read={stats['read']} written={stats['written']} "
             f"errors={stats['errors']} ({mode})"
         )
 
-    if args.recompute_counts and not args.dry_run:
+    if args.recompute_counts and not dry_run:
         print("recomputing nRes/nLike ...")
         recompute_log_counts(source.Table(f"log{args.table_suffix}"))
         recompute_counts()

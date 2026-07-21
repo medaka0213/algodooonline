@@ -184,6 +184,8 @@ def run_migration() -> None:
         [
             sys.executable,
             "scripts/migrate_v2_import.py",
+            "--apply",
+            "--yes",
             "--source-endpoint-url",
             ENDPOINT,
             "--table-suffix",
@@ -246,6 +248,12 @@ def main() -> None:
     assert olduser.v1_name == "OldUser"
     signin = signin_user("olduser", V1_PASSWORD)
     assert signin == {"result": True, "isV2": False, "isV1": True}, signin
+    # Successful legacy signin must upgrade the stored digest to salted scrypt.
+    upgraded = get_user("olduser")
+    assert upgraded is not None and upgraded.v1_password is not None
+    assert upgraded.v1_password.startswith("scrypt$"), upgraded.v1_password
+    # Verification against the upgraded hash must still work.
+    assert signin_user("olduser", V1_PASSWORD)["isV1"] is True
     assert signin_user("olduser", "wrong")["isV1"] is False
 
     newuser = get_user("newuser")
@@ -255,6 +263,12 @@ def main() -> None:
     run_migration()
     after = destination_item_count()
     assert before == after, f"re-import must be idempotent ({before} → {after})"
+
+    reimported = get_user("olduser")
+    assert reimported is not None and reimported.v1_password is not None
+    assert reimported.v1_password.startswith("scrypt$"), (
+        "re-import must not downgrade an upgraded password hash"
+    )
 
     print("migration integration ok")
 

@@ -1,10 +1,11 @@
 import json
+import os
 import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import bleach
 import markdown
@@ -79,8 +80,161 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+# --- Request body size limit (OWASP A04, issue #19) -------------------------
+# `_form_data` and the JSON API read the whole body into memory; cap it so a
+# single request cannot exhaust RAM. Configurable via MAX_REQUEST_BODY_BYTES.
+MAX_REQUEST_BODY_BYTES = int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(20 * 1024 * 1024)))
+
+
+class _BodyTooLargeError(Exception):
+    """Raised while streaming a request body that exceeds the configured cap."""
+
+
+class BodySizeLimitMiddleware:
+    """Pure-ASGI middleware: reject oversized bodies with 413.
+
+    Checks Content-Length up front and additionally counts streamed chunks so
+    chunked uploads without a Content-Length header are capped too.
+    """
+
+    def __init__(self, app, max_bytes: int = MAX_REQUEST_BODY_BYTES) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        for name, value in scope.get("headers", []):
+            if name == b"content-length":
+                try:
+                    declared = int(value)
+                except ValueError:
+                    declared = None
+                if declared is not None and declared > self.max_bytes:
+                    await self._reject(send)
+                    return
+        received = 0
+        response_started = False
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body") or b"")
+                if received > self.max_bytes:
+                    raise _BodyTooLargeError
+            return message
+
+        async def tracking_send(message):
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except _BodyTooLargeError:
+            if response_started:
+                raise
+            await self._reject(send)
+
+    @staticmethod
+    async def _reject(send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b'{"detail":"request body too large"}',
+            }
+        )
+
+
 app = FastAPI(title="algodooonline", version="0.1.0", lifespan=lifespan)
 app.add_middleware(SessionRefreshMiddleware)
+app.add_middleware(BodySizeLimitMiddleware)
+
+
+# --- CSRF: Origin/Referer validation (OWASP A01, issue #14) ------------------
+# Session cookies are SameSite=Lax; this middleware adds a second layer for
+# unsafe methods. Deliberate multi-layer tradeoff: requests that carry NO
+# Origin/Referer header at all (curl, integration test scripts, legacy JSON
+# API clients) are allowed through — browsers always attach Origin to
+# cross-origin form POSTs, so cookie-riding CSRF from a browser is still
+# blocked, while header-less same-host tooling keeps working. Requests that
+# carry an x-api-key header are exempt: that custom header cannot be attached
+# by a cross-site form post without a CORS preflight, so those calls are not
+# CSRF-able via cookies.
+_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _is_cross_origin(request: Request) -> bool:
+    source = request.headers.get("origin")
+    if source is None:
+        source = request.headers.get("referer")
+    if source is None:
+        return False  # documented tradeoff: header-less clients are allowed
+    parsed = urlparse(source)
+    if not parsed.scheme or not parsed.netloc:
+        return True  # "null" or malformed Origin: treat as cross-origin
+    host = request.headers.get("host", "")
+    return parsed.netloc.lower() != host.strip().lower()
+
+
+@app.middleware("http")
+async def csrf_origin_middleware(request: Request, call_next):
+    if (
+        request.method in _UNSAFE_METHODS
+        and "x-api-key" not in request.headers
+        and _is_cross_origin(request)
+    ):
+        return JSONResponse({"detail": "cross-origin request rejected"}, status_code=403)
+    return await call_next(request)
+
+
+# --- Security response headers (OWASP A05, issue #16) ------------------------
+# CSP matches what the app actually uses: EasyMDE from cdn.jsdelivr.net plus
+# inline <script>/<style> blocks in index.html; user markdown may embed
+# remote http(s) images and media files can live on an external asset host
+# (ASSET_PUBLIC_BASE_URL), hence the permissive img-src.
+_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: blob: http: https:; "
+    "media-src 'self' blob:; "
+    "font-src 'self' data:; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Content-Security-Policy", _CONTENT_SECURITY_POLICY)
+    # HSTS only when the request actually arrived over https (directly or via
+    # a TLS-terminating proxy) so plain-http local dev is unaffected.
+    if (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "").strip().lower() == "https"
+    ):
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
+
+
 app.include_router(api_router)
 app.include_router(api_router, prefix="/api")
 MEDIA_DIR = media_root()
@@ -187,6 +341,22 @@ def _data_download_context(filedata: list[str] | None) -> dict[str, str]:
         "data_primary_thumb": thumb,
         "data_primary_thumb_url": media_public_url(thumb) if thumb else "",
     }
+
+
+def _safe_next_url(next_url: str, fallback: str) -> str:
+    """Only allow site-relative redirect targets (OWASP A01, issue #13).
+
+    Browsers treat backslashes as slashes, so `/\\evil.com` would otherwise be
+    an open redirect; normalize them first, then require a single leading `/`
+    with no scheme/netloc.
+    """
+    candidate = (next_url or "").strip().replace("\\", "/")
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return fallback
+    parsed = urlparse(candidate)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    return candidate
 
 
 def _wants_delete(form: dict[str, str]) -> bool:
@@ -992,9 +1162,7 @@ async def like_thread_form(request: Request, route: str, thread_id: str) -> Redi
         delete_like(thread_id, user["sub"])
     else:
         create_like(thread_id, user["sub"], LikeType(form.get("type", "good")))
-    next_url = form.get("next", "")
-    if not next_url.startswith("/") or next_url.startswith("//"):
-        next_url = f"/i/{legacy_route.value}/{thread_id}"
+    next_url = _safe_next_url(form.get("next", ""), f"/i/{legacy_route.value}/{thread_id}")
     return RedirectResponse(url=next_url, status_code=303)
 
 
@@ -1012,9 +1180,7 @@ async def like_log_form(
         delete_like(log_id, user["sub"])
     else:
         create_like(log_id, user["sub"], LikeType(form.get("type", "good")))
-    next_url = form.get("next", "")
-    if not next_url.startswith("/") or next_url.startswith("//"):
-        next_url = f"/i/{legacy_route.value}/{thread_id}"
+    next_url = _safe_next_url(form.get("next", ""), f"/i/{legacy_route.value}/{thread_id}")
     return RedirectResponse(url=next_url, status_code=303)
 
 
