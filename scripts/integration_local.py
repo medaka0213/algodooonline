@@ -460,7 +460,19 @@ def main() -> None:
         "/user/signin",
         {"submition": {"Username": "new-local", "v1_password": "x"}},
     )["isV2"]
-    assert api("POST", "/user/update", {"submition": {"idToken": "local-token-api-user"}})["result"]
+    # Local id tokens embed a unix expiry (`-e{ts}`); expired/legacy ones are rejected.
+    fresh_token = f"local-token-api-user-e{int(time.time()) + 300}"
+    assert api("POST", "/user/update", {"submition": {"idToken": fresh_token}})["result"]
+    try:
+        api("POST", "/user/update", {"submition": {"idToken": "local-token-api-user-e1"}})
+        raise AssertionError("expired local token must be rejected")
+    except HTTPError as exc:
+        assert exc.code == 401, f"expected 401 for expired token, got {exc.code}"
+    try:
+        api("POST", "/user/update", {"submition": {"idToken": "local-token-api-user"}})
+        raise AssertionError("legacy no-expiry local token must be rejected")
+    except HTTPError as exc:
+        assert exc.code == 401, f"expected 401 for legacy token, got {exc.code}"
 
     print("integration ok")
 

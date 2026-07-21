@@ -3,9 +3,11 @@ set -eu
 
 cd /app
 
-# The pinned ddb-single git dependency needs a git executable (bare uv image),
-# and ffmpeg transcodes Playwright's WebM recordings to MP4 for the HTML
-# report (Playwright's bundled ffmpeg can't mux MP4). Install both in one shot.
+# The pinned ddb-single git dependency needs a git executable, and ffmpeg
+# transcodes Playwright's WebM recordings to MP4 for the HTML report
+# (Playwright's bundled ffmpeg can't mux MP4). The compose dev image
+# (Dockerfile `dev` stage) preinstalls both; this apt fallback only runs when
+# the container image lacks them (e.g. running against the bare uv image).
 missing=""
 command -v git >/dev/null 2>&1 || missing="$missing git"
 command -v ffmpeg >/dev/null 2>&1 || missing="$missing ffmpeg"

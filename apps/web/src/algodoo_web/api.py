@@ -1,3 +1,5 @@
+import threading
+import time
 from typing import Any
 
 from algodoo_data.repository import (
@@ -36,6 +38,54 @@ from algodoo_web.legacy_api_guard import (
 )
 
 router = APIRouter(dependencies=[Depends(require_configured_api_key)])
+
+# Cap for POST /like/own/batch (OWASP A04, issue #19): the web UI batches one
+# page of threads/logs at a time, far below this.
+MAX_BATCH_POST_IDS = 100
+
+# Sliding-window rate limit for POST /user/signin (OWASP A07, issue #26).
+# Keyed on username + direct client IP; in-process only, which matches the
+# single-process deployment of this app.
+SIGNIN_MAX_ATTEMPTS = 10
+SIGNIN_WINDOW_SECONDS = 300.0
+_signin_attempts: dict[str, list[float]] = {}
+_signin_lock = threading.Lock()
+
+
+def _check_signin_rate_limit(username: str, client_ip: str) -> None:
+    key = f"{username}\n{client_ip}"
+    now = time.monotonic()
+    with _signin_lock:
+        # Opportunistic prune so the map cannot grow without bound.
+        if len(_signin_attempts) > 1024:
+            for stale in [
+                k
+                for k, stamps in _signin_attempts.items()
+                if not stamps or now - stamps[-1] >= SIGNIN_WINDOW_SECONDS
+            ]:
+                del _signin_attempts[stale]
+        attempts = [t for t in _signin_attempts.get(key, []) if now - t < SIGNIN_WINDOW_SECONDS]
+        if len(attempts) >= SIGNIN_MAX_ATTEMPTS:
+            _signin_attempts[key] = attempts
+            raise HTTPException(
+                status_code=429, detail="too many sign-in attempts, try again later"
+            )
+        attempts.append(now)
+        _signin_attempts[key] = attempts
+
+
+def _session_claims(request: Request) -> dict[str, Any]:
+    """Verified claims for the current session (cookie or legacy Bearer token)."""
+    token = request.cookies.get("algodoo_idtoken")
+    if not token:
+        header = (request.headers.get("authorization") or "").strip()
+        if header.lower().startswith("bearer "):
+            header = header[len("bearer ") :].strip()
+        token = header
+    claims = get_auth_backend().verify_id_token(token or "")
+    if not claims:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return claims
 
 
 def _submission(body: dict[str, Any]) -> dict[str, Any]:
@@ -300,7 +350,13 @@ def api_own_likes_batch(
     user_id = str(body.get("user_id") or sub)
     if user_id != sub:
         raise HTTPException(status_code=403, detail="user_id does not match session")
-    likes = [get_own_like(str(post_id), user_id) for post_id in body.get("post_ids", [])]
+    post_ids = body.get("post_ids", [])
+    if not isinstance(post_ids, list) or len(post_ids) > MAX_BATCH_POST_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"post_ids must be a list of at most {MAX_BATCH_POST_IDS} ids",
+        )
+    likes = [get_own_like(str(post_id), user_id) for post_id in post_ids]
     return {"result": True, "likes": likes}
 
 
@@ -346,13 +402,24 @@ def api_create_user(
     request: Request,
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, bool]:
-    require_session(request)
+    # OWASP A01 (issue #11): identity comes from the verified session token,
+    # never from the request body — otherwise any signed-in caller could
+    # create/overwrite arbitrary user records (and hijack their sub).
+    sub = require_session(request)
+    claims = _session_claims(request)
+    session_username = str(claims.get("name") or claims.get("cognito:username") or "").strip()
     data = _submission(body)
+    body_sub = str(data.get("sub") or "").strip()
+    if body_sub and body_sub != sub:
+        raise HTTPException(status_code=403, detail="sub does not match session")
+    body_username = str(data.get("Username") or data.get("username") or "").strip()
+    if body_username and session_username and body_username != session_username:
+        raise HTTPException(status_code=403, detail="username does not match session")
     create_user(
-        username=str(data.get("Username") or data.get("username") or ""),
-        email=str(data.get("email") or ""),
-        sub=str(data.get("sub") or data.get("Username") or ""),
-        email_verified=bool(data.get("email_verified", True)),
+        username=session_username or body_username,
+        email=str(claims.get("email") or data.get("email") or ""),
+        sub=sub,
+        email_verified=bool(claims.get("email_verified", data.get("email_verified", True))),
         v1_id=data.get("v1_id"),
         v1_name=data.get("v1_name"),
     )
@@ -360,9 +427,20 @@ def api_create_user(
 
 
 @router.post("/user/signin")
-def api_signin_user(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, bool]:
+def api_signin_user(
+    request: Request,
+    body: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, bool]:
     data = _submission(body)
-    return signin_user(str(data.get("Username", "")), str(data.get("v1_password", "")))
+    username = str(data.get("Username", ""))
+    client_ip = request.client.host if request.client else "unknown"
+    # OWASP A07 (issue #26): throttle credential guessing per username+IP.
+    _check_signin_rate_limit(username, client_ip)
+    # The isV1/isV2 flags reveal whether a username is a legacy v1 account.
+    # They are kept intentionally: SPEC §472 and the v1→v2 migration flow
+    # (login page redirecting v1 users to /auth/signup/{name}) require them,
+    # so the rate limit above is the mitigation for enumeration abuse.
+    return signin_user(username, str(data.get("v1_password", "")))
 
 
 @router.post("/user/update")

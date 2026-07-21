@@ -1,3 +1,15 @@
+# Script-running dev/test services share the `dev` stage of the Dockerfile:
+# the stock uv image with git (ddb-single git dependency) and ffmpeg
+# (Playwright MP4 muxing) preinstalled at image build time, so containers do
+# not run apt-get at startup (OWASP A08). `docker compose up` builds it
+# automatically on first run; the scripts keep an apt fallback for the rare
+# case the tools are missing.
+x-dev-image: &dev-image
+  image: algodooonline-dev
+  build:
+    context: .
+    target: dev
+
 services:
   dynamodb:
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
@@ -9,7 +21,8 @@ services:
       AWS_SECRET_ACCESS_KEY: local
       UV_LINK_MODE: copy
     ports:
-      - "8001:8000"
+      # Loopback-only: dev services must not listen on all host interfaces.
+      - "127.0.0.1:8001:8000"
     healthcheck:
       test:
         [
@@ -35,7 +48,7 @@ services:
       AWS_SECRET_ACCESS_KEY: local
       UV_LINK_MODE: copy
     ports:
-      - "8002:8000"
+      - "127.0.0.1:8002:8000"
     healthcheck:
       test:
         [
@@ -52,7 +65,7 @@ services:
       - uv-cache:/root/.cache/uv
 
   app:
-    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    <<: *dev-image
     working_dir: /app
     command: ["sh", "/app/scripts/start-dev.sh"]
     environment:
@@ -70,7 +83,7 @@ services:
       LEGACY_X_API_KEY: local-x-api-key
       UV_LINK_MODE: copy
     ports:
-      - "8080:8000"
+      - "127.0.0.1:8080:8000"
     depends_on:
       dynamodb:
         condition: service_healthy
@@ -101,7 +114,7 @@ services:
           - webapp
 
   integration:
-    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    <<: *dev-image
     profiles: ["test"]
     working_dir: /app
     command: ["sh", "/app/scripts/integration-local.sh"]
@@ -126,7 +139,7 @@ services:
 
   # Playwright browser e2e test covering every legacy screen (SPEC.md) end to end.
   e2e:
-    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    <<: *dev-image
     profiles: ["e2e"]
     working_dir: /app
     command: ["sh", "/app/scripts/e2e-local.sh"]
@@ -148,7 +161,7 @@ services:
 
   # Cognito auth backend test: the same moto server also emulates cognito-idp.
   app-cognito:
-    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    <<: *dev-image
     profiles: ["test-cognito"]
     working_dir: /app
     command: ["sh", "/app/scripts/start-cognito-test.sh"]
@@ -165,7 +178,7 @@ services:
       LEGACY_X_API_KEY: cognito-test-api-key
       UV_LINK_MODE: copy
     ports:
-      - "8081:8000"
+      - "127.0.0.1:8081:8000"
     depends_on:
       dynamodb:
         condition: service_healthy
@@ -186,7 +199,7 @@ services:
       - uv-cache:/root/.cache/uv
 
   integration-cognito:
-    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    <<: *dev-image
     profiles: ["test-cognito"]
     working_dir: /app
     command: ["sh", "/app/scripts/integration-cognito.sh"]

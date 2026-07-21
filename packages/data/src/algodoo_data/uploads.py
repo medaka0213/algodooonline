@@ -10,6 +10,14 @@ import zipfile
 
 from algodoo_domain.models import LegacyRoute
 
+# Maximum decoded size of a single Data-URL payload (OWASP A04, issue #19).
+# Data-URL contents are persisted to S3/MinIO or the local media dir (only the
+# storage key goes into DynamoDB), so a 10 MB cap comfortably covers PHZ scenes
+# and JPEG uploads while bounding memory used by base64 decoding.
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# Base64 expands data 4:3; check the encoded length BEFORE decoding.
+_MAX_BASE64_LEN = (MAX_UPLOAD_BYTES * 4) // 3 + 4
+
 _JPEG_PREFIX = "data:image/jpeg;base64,"
 
 _IMAGE_KEY = re.compile(r"^IMAGE/[A-Za-z0-9_.-]+\.(?:jpe?g|png|gif|webp)$")
@@ -30,11 +38,19 @@ def validate_storage_key(route: LegacyRoute, key: str) -> str | None:
 
 
 def parse_data_url(value: str) -> tuple[str, bytes] | None:
-    """Return (mime, raw_bytes) or None if not a data URL."""
+    """Return (mime, raw_bytes) or None if not a data URL.
+
+    Raises ValueError when the payload exceeds MAX_UPLOAD_BYTES; callers should
+    map that to HTTP 400/413.
+    """
     if not value.startswith("data:") or "," not in value:
         return None
     head, b64 = value.split(",", 1)
     mime = head.split(";", 1)[0].split(":", 1)[1].strip().lower()
+    if len(b64) > _MAX_BASE64_LEN:
+        raise ValueError(
+            f"upload payload too large: exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"
+        )
     try:
         raw = base64.b64decode(b64, validate=True)
     except (binascii.Error, ValueError):
@@ -56,7 +72,10 @@ def validate_thread_filedata(route: LegacyRoute, filedata: list[str]) -> str | N
                 continue
             if not item.lower().startswith(_JPEG_PREFIX.lower()):
                 return "IMAGE filedata must use image/jpeg Data URLs"
-            parsed = parse_data_url(item)
+            try:
+                parsed = parse_data_url(item)
+            except ValueError as exc:
+                return str(exc)
             if not parsed:
                 return "invalid IMAGE Data URL"
             _mime, raw = parsed
@@ -68,7 +87,10 @@ def validate_thread_filedata(route: LegacyRoute, filedata: list[str]) -> str | N
             if not item:
                 continue
             if item.startswith("data:"):
-                parsed = parse_data_url(item)
+                try:
+                    parsed = parse_data_url(item)
+                except ValueError as exc:
+                    return str(exc)
                 if not parsed:
                     return "invalid DATA Data URL"
                 mime, raw = parsed
