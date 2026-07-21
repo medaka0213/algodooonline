@@ -326,6 +326,9 @@ def _is_image(value: str) -> bool:
 
 
 def _is_thumb(value: str) -> bool:
+    """Whether a filedata key is a preview image: DATA phz uploads persist the
+    archive's thumb.png as a sibling `*_thumb.png` key (IMAGE keys are the
+    uploaded images themselves, checked with `_is_image`)."""
     return "_thumb." in value.lower() or value.lower().endswith("thumb.png")
 
 

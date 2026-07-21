@@ -491,6 +491,20 @@
         background: #f8f9fa;
         text-align: center;
       }
+      .file-preview {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .5rem;
+        justify-content: center;
+      }
+      .file-preview img {
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        border: 1px solid #ced4da;
+        border-radius: .25rem;
+      }
+      .file-preview:empty { display: none; }
       .bg-warning { background: #ffc107; }
       @media (max-width: 720px) {
         .navbar { align-items: flex-start; flex-direction: column; }
@@ -1053,14 +1067,105 @@
         var isBase64 = /;base64$/.test(result.slice(5, comma));
         return "data:" + mime + (isBase64 ? ";base64" : "") + "," + result.slice(comma + 1);
       }
+      function extractZipEntry(bytes, name) {
+        // Minimal ZIP reader — just enough to pull thumb.png out of a .phz
+        // for the upload preview (stored and deflate entries only). Resolves
+        // null for anything it can't read (truncated archive, unsupported
+        // method, no DecompressionStream) instead of throwing.
+        try {
+          var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          var i = bytes.byteLength - 22;
+          while (i >= 0 && view.getUint32(i, true) !== 0x06054b50) i--;
+          if (i < 0) return Promise.resolve(null);
+          var count = view.getUint16(i + 10, true);
+          var p = view.getUint32(i + 16, true);
+          for (var j = 0; j < count; j++) {
+            if (view.getUint32(p, true) !== 0x02014b50) break;
+            var method = view.getUint16(p + 10, true);
+            var compSize = view.getUint32(p + 20, true);
+            var nameLen = view.getUint16(p + 28, true);
+            var extraLen = view.getUint16(p + 30, true);
+            var commentLen = view.getUint16(p + 32, true);
+            var localOffset = view.getUint32(p + 42, true);
+            var entryName = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
+            if (entryName === name) {
+              var dataStart =
+                localOffset + 30 + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
+              var comp = bytes.subarray(dataStart, dataStart + compSize);
+              if (method === 0) return Promise.resolve(comp);
+              if (method !== 8 || typeof DecompressionStream === "undefined") return Promise.resolve(null);
+              var stream = new Blob([comp]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+              return new Response(stream)
+                .arrayBuffer()
+                .then(function (buf) {
+                  return new Uint8Array(buf);
+                })
+                .catch(function () {
+                  return null;
+                });
+            }
+            p += 46 + nameLen + extraLen + commentLen;
+          }
+        } catch (e) {}
+        return Promise.resolve(null);
+      }
+      function renderFilePreview(preview, values) {
+        if (!preview) return;
+        (preview._blobUrls || []).forEach(function (url) {
+          URL.revokeObjectURL(url);
+        });
+        preview._blobUrls = [];
+        preview.textContent = "";
+        values.forEach(function (value) {
+          if (typeof value !== "string") return;
+          if (value.indexOf("data:image/") === 0) {
+            var img = document.createElement("img");
+            img.src = value;
+            img.alt = "preview";
+            preview.appendChild(img);
+            return;
+          }
+          // .phz upload: the archive's mandatory thumb.png is the preview.
+          if (value.indexOf("data:application/zip;base64,") !== 0) return;
+          var bin;
+          try {
+            bin = atob(value.slice(value.indexOf(",") + 1));
+          } catch (e) {
+            return;
+          }
+          var bytes = new Uint8Array(bin.length);
+          for (var k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+          var thumb = document.createElement("img");
+          thumb.alt = "preview";
+          preview.appendChild(thumb);
+          extractZipEntry(bytes, "thumb.png")
+            .then(function (data) {
+              if (data && data.length) {
+                thumb.src = URL.createObjectURL(new Blob([data], { type: "image/png" }));
+                preview._blobUrls.push(thumb.src);
+              } else {
+                thumb.remove();
+              }
+            })
+            .catch(function () {
+              thumb.remove();
+            });
+        });
+      }
       document.querySelectorAll("[data-file-input]").forEach(function (input) {
         input.addEventListener("change", function () {
           var target = document.querySelector(input.dataset.fileInput);
           var list = document.querySelector(input.dataset.fileList);
+          var preview = input.dataset.filePreview ? document.querySelector(input.dataset.filePreview) : null;
           if (!target) return;
           var names = [];
           var loaded = [];
           var wantJpeg = input.dataset.requireJpeg === "1";
+          function sync() {
+            target.value = loaded.join("\n");
+            if (list) list.textContent = names.length + "件: " + names.join(", ");
+            renderFilePreview(preview, loaded);
+          }
           Array.prototype.forEach.call(input.files || [], function (file) {
             names.push(file.name);
             var reader = new FileReader();
@@ -1078,19 +1183,32 @@
                     result = c.toDataURL("image/jpeg", 0.92);
                   } catch (e) {}
                   loaded.push(result);
-                  target.value = loaded.join("\n");
-                  if (list) list.textContent = names.length + "件: " + names.join(", ");
+                  sync();
                 };
                 img.src = result;
               } else {
                 loaded.push(normalizeDataUrlMime(result, file.name));
-                target.value = loaded.join("\n");
-                if (list) list.textContent = names.length + "件: " + names.join(", ");
+                sync();
               }
             };
             reader.readAsDataURL(file);
           });
         });
+      });
+      // After a server-side validation error the Data URLs come back in the
+      // (hidden) filedata textarea; rebuild the thumbnails from it on load.
+      // Rebuild only when the textarea holds Data URLs (a fresh selection):
+      // an unchanged edit form round-trips stored keys, and those previews
+      // are already server-rendered — clearing them here would lose them.
+      document.querySelectorAll("[data-preview-source]").forEach(function (preview) {
+        var source = document.querySelector(preview.dataset.previewSource);
+        if (!source || !source.value) return;
+        var values = source.value.split("\n");
+        var hasDataUrl = values.some(function (value) {
+          return value.indexOf("data:") === 0;
+        });
+        if (!hasDataUrl) return;
+        renderFilePreview(preview, values);
       });
       (function () {
         var root = document.getElementById("image-slideshow");
