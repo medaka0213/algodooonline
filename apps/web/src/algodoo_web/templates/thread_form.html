@@ -21,17 +21,22 @@
       <p>ファイルをドラッグ＆ドロップ</p>
       <p>またはクリックして選択</p>
       {% if active_route.value == "IMAGE" %}
-      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple data-require-jpeg="1" data-file-input="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-list="#file-list-{{ target_thread.thread_id if target_thread else 'new' }}" />
+      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple data-require-jpeg="1" data-file-input="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-list="#file-list-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-preview="#file-preview-{{ target_thread.thread_id if target_thread else 'new' }}" />
       {% else %}
-      <input type="file" accept=".phz,.phn,application/zip,text/plain" data-file-input="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-list="#file-list-{{ target_thread.thread_id if target_thread else 'new' }}" />
+      <input type="file" accept=".phz,.phn,application/zip,text/plain" data-file-input="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-list="#file-list-{{ target_thread.thread_id if target_thread else 'new' }}" data-file-preview="#file-preview-{{ target_thread.thread_id if target_thread else 'new' }}" />
       {% endif %}
       <div id="file-list-{{ target_thread.thread_id if target_thread else 'new' }}">
         {% if target_thread and target_thread.filedata %}{{ target_thread.filedata|length }}件: {{ target_thread.filedata|join(", ") }}{% endif %}
       </div>
+      <div class="file-preview" id="file-preview-{{ target_thread.thread_id if target_thread else 'new' }}" data-preview-source="#filedata-{{ target_thread.thread_id if target_thread else 'new' }}">
+        {# Edit form: IMAGE keys are the images themselves, DATA phz uploads carry an extracted *_thumb.png key. #}
+        {% if target_thread %}{% for file in target_thread.filedata %}{% if (active_route.value == "IMAGE" and file|is_image) or (active_route.value == "DATA" and file|is_thumb) %}<img src="{{ file|media_url }}" alt="preview" />{% endif %}{% endfor %}{% endif %}
+      </div>
     </div>
   </div>
   {% endif %}
-  <div class="form-group">
+  {# IMAGE/DATA: the textarea only carries generated Data URLs, so it stays as a hidden transport and the drop zone shows previews instead. #}
+  <div class="form-group"{% if active_route.value in ["IMAGE", "DATA"] %} hidden{% endif %}>
     <label>filedata
       <textarea class="form-control" id="filedata-{{ target_thread.thread_id if target_thread else 'new' }}" name="filedata">{% if preset_filedata is not none %}{{ preset_filedata }}{% elif target_thread %}{% for file in target_thread.filedata %}{{ file }}
 {% endfor %}{% endif %}</textarea>

@@ -95,10 +95,8 @@ def create_thread(
     return strip_origin(page.url)
 
 
-def edit_thread(
-    page: Page, route: str, *, title: str | None = None, content: str | None = None
-) -> None:
-    """Edit the currently displayed thread via its own-post "menu" dropdown."""
+def open_thread_edit_modal(page: Page) -> Locator:
+    """Open the thread edit modal via the own-post "menu" dropdown."""
     dropdown = page.locator("article.post-detail details.dropdown")
     dropdown.locator("summary").click()
     dropdown.get_by_role("button", name="投稿を編集").click()
@@ -107,6 +105,14 @@ def edit_thread(
     # child is `position: fixed`), so assert on the child that actually
     # renders with real dimensions rather than the wrapper.
     expect(modal.locator(".modal-body")).to_be_visible()
+    return modal
+
+
+def edit_thread(
+    page: Page, route: str, *, title: str | None = None, content: str | None = None
+) -> None:
+    """Edit the currently displayed thread via its own-post "menu" dropdown."""
+    modal = open_thread_edit_modal(page)
     if title is not None:
         modal.get_by_label("title").fill(title)
     if content is not None:
