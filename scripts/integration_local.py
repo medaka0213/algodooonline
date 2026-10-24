@@ -178,6 +178,9 @@ def main() -> None:
     assert 'id="main-content"' in home
     assert 'var(--paper)' in home  # Shared styles are embedded, including on Lambda.
     assert "{% include" not in home
+    assert 'class="hero-scene"' not in home
+    assert '<img ' not in home
+    assert "THE ALGODOO COMMUNITY" not in home
     assert "migration" not in home.lower()
     assert "single-table" not in home
 

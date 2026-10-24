@@ -11,6 +11,8 @@ def test_home_unauthenticated(page: Page) -> None:
 
     expect(page.locator("h1.home-title")).to_have_text("AlgodooOnline")
     expect(page.locator(".home-status")).to_have_text("ログインしてください")
+    # Home keeps a text-only introduction; images remain part of board attachments.
+    expect(page.locator("main img, .hero-scene")).to_have_count(0)
 
     nav = page.locator("nav.index-nav")
     expect(nav.get_by_role("link", name="BBS掲示板")).to_have_attribute("href", "/i/BBS")

@@ -10,15 +10,9 @@
     </style>
   </head>
   <body>
-    {% macro icon(name) -%}
+    {% macro arrow_icon() -%}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      {% if name == 'BBS' %}<path d="M20 11.5a8 8 0 0 1-8 8H5l-3 2v-10a9 9 0 0 1 18 0Z"/><path d="M7 10h8M7 14h5"/>
-      {% elif name == 'WIKI' %}<path d="M12 5v15M3 4.5c3-1 6-.5 9 1.5 3-2 6-2.5 9-1.5V19c-3-1-6-.5-9 1.5-3-2-6-2.5-9-1.5Z"/>
-      {% elif name == 'IMAGE' %}<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/>
-      {% elif name == 'DATA' %}<path d="m12 2 9 5-9 5-9-5 9-5Zm-9 5v10l9 5 9-5V7M12 12v10"/>
-      {% elif name == 'arrow' %}<path d="M4 12h16m-6-6 6 6-6 6"/>
-      {% elif name == 'user' %}<circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>
-      {% endif %}
+      <path d="M4 12h16m-6-6 6 6-6 6"/>
     </svg>
     {%- endmacro %}
     {% macro render_log_item(log, active_route, selected_thread, current_user, search_query, responses_by_log, log_like_summary, log_own_likes) %}
@@ -126,7 +120,7 @@
     <a class="skip-link" href="#main-content">本文へ移動</a>
     <nav class="navbar" aria-label="メインナビゲーション">
       <div class="navbar-left">
-        <a class="navbar-brand" href="/"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>AlgodooOnline <span class="brand-version">[ver 2.0]</span></span></a>
+        <a class="navbar-brand" href="/"><span>AlgodooOnline <span class="brand-version">[ver 2.0]</span></span></a>
         <details class="dropdown">
           <summary>サイトマップ ▾</summary>
           <div class="dropdown-menu">
@@ -154,7 +148,7 @@
           </div>
         </details>
         {% else %}
-        <a class="auth-link" href="/auth/login">{{ icon('user') }}ユーザー認証</a>
+        <a class="auth-link" href="/auth/login">ユーザー認証</a>
         {% endif %}
       </div>
     </nav>
@@ -163,53 +157,38 @@
       {% if page == "home" %}
       <section class="home-hero" aria-labelledby="home-heading">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="status-dot"></span> THE ALGODOO COMMUNITY</p>
           <h1 id="home-heading" class="home-title">AlgodooOnline</h1>
-          <h2 class="hero-heading">ひらめきを、<br /><span>動かそう。</span></h2>
-          <p class="hero-description">つくって、試して、分かち合う。<br />Algodooを楽しむみんなのコミュニティ。</p>
-          <a class="hero-link" href="/i/BBS">掲示板をのぞいてみる {{ icon('arrow') }}</a>
+          <p class="hero-description">Algodooの作品、知識、アイデアを共有するコミュニティ。</p>
         </div>
-        <div class="hero-scene" aria-hidden="true">
-          <div class="scene-caption"><span>THE PLAYGROUND</span><span>01 — ∞</span></div>
-          {% include "physics-scene.svg" %}
-          <div class="scene-caption scene-caption-bottom"><span>A LITTLE CURIOSITY. ENDLESS POSSIBILITIES.</span><span>↗</span></div>
-        </div>
+        <p class="home-status">
+          {% if current_user %}ユーザー: {{ current_user.name }} ({{ current_user.sub }}){% else %}<a href="/auth/login">ログインしてください</a>{% endif %}
+        </p>
       </section>
       <section class="community-section" aria-labelledby="community-heading">
       <div class="section-heading">
-        <div><p class="eyebrow">EXPLORE THE COMMUNITY</p><h2 id="community-heading">好きなところから、はじめよう。</h2></div>
-        <span class="section-note">アイデアがつながる、4つの場所</span>
+        <h2 id="community-heading">コミュニティ</h2>
+        <span class="section-note">4つの掲示板</span>
       </div>
       <nav class="index-nav" aria-label="掲示板一覧">
-        {% for code, label, category, description in [
-          ('BBS', 'BBS掲示板', 'TALK & CONNECT', '質問も、発見も、気軽な雑談も。みんなと話してみよう。'),
-          ('WIKI', 'Wiki', 'LEARN & DISCOVER', '使い方やテクニックを持ち寄って、できることを増やそう。'),
-          ('IMAGE', '画像掲示板', 'SHOW & INSPIRE', 'お気に入りのシーンや作品を、画像で見せ合おう。'),
-          ('DATA', 'Phz/Phnデータ掲示板', 'MAKE & SHARE', 'シーンを共有して、誰かのアイデアを動かしてみよう。')
+        {% for code, label, description in [
+          ('BBS', 'BBS掲示板', '質問、発見、気軽な雑談に。'),
+          ('WIKI', 'Wiki', '使い方やテクニックを共有。'),
+          ('IMAGE', '画像掲示板', 'お気に入りのシーンや作品を、画像で。'),
+          ('DATA', 'Phz/Phnデータ掲示板', 'シーンデータの共有とダウンロード。')
         ] %}
-        <a class="index-list card-{{ code|lower }}" href="/i/{{ code }}" aria-label="{{ label }}">
-          <span class="card-top"><span class="board-icon">{{ icon(code) }}</span><span class="card-number">0{{ loop.index }}</span></span>
-          <span class="card-category">{{ category }}</span>
-          <h3>{{ label }}</h3>
-          <p>{{ description }}</p>
-          <span class="card-bottom"><span>{{ 'PHZ / PHN' if code == 'DATA' else code }}</span>{{ icon('arrow') }}</span>
+        <a class="index-list" href="/i/{{ code }}" aria-label="{{ label }}">
+          <span class="card-code">{{ code }}</span>
+          <div><h3>{{ label }}</h3><p>{{ description }}</p></div>
+          {{ arrow_icon() }}
         </a>
         {% endfor %}
       </nav>
       </section>
-      <aside class="community-welcome">
-        <span class="welcome-symbol" aria-hidden="true">✳</span>
-        <div><h2>つくる楽しさを、みんなで。</h2><p>見るだけでも、はじめての投稿でも。あなたの好奇心を歓迎します。</p></div>
-        <p class="home-status">
-          {% if current_user %}ユーザー: {{ current_user.name }} ({{ current_user.sub }}){% else %}<a href="/auth/login">ログインしてください {{ icon('arrow') }}</a>{% endif %}
-        </p>
-      </aside>
       {% endif %}
 
       {% if page in ["login", "signup", "logout", "changepass", "forgotpass"] %}
       <section class="auth-card">
-        <div class="auth-card-icon" aria-hidden="true">{{ icon('user') }}</div>
-        <p class="eyebrow">YOUR COMMUNITY, YOUR PLACE</p>
+        <p class="eyebrow">ACCOUNT</p>
         {% if form_error %}
         <p class="form-error">{{ form_error }}</p>
         {% endif %}
@@ -311,7 +290,6 @@
 
       {% if not selected_thread %}
       <header class="board-heading">
-        <span class="board-icon icon-{{ active_route.value|lower }}">{{ icon(active_route.value) }}</span>
         <div><p class="eyebrow">{{ active_route.value }} / COMMUNITY</p><h1>{{ route_labels[active_route] }}</h1><p>{{ {'BBS': '質問も、発見も、気軽な雑談も。', 'WIKI': '使い方やテクニックを、みんなの知識に。', 'IMAGE': 'お気に入りのシーンを、画像で見せ合おう。', 'DATA': 'シーンを共有して、アイデアを動かそう。'}[active_route.value] }}</p></div>
       </header>
       <details class="modal-toggle" {% if open_modal == "new-thread" %}open{% endif %}>
@@ -507,7 +485,7 @@
       {% endif %}
     </main>
 
-    <footer class="site-footer"><a href="/">AlgodooOnline<span class="footer-dot">.</span></a><span>好奇心から、つながる場所。</span><span>MADE FOR THE JOY OF CREATING</span></footer>
+    <footer class="site-footer"><a href="/">AlgodooOnline<span class="footer-dot">.</span></a><span>Algodoo Community</span></footer>
 
     <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js" integrity="sha384-KtB38COewxfrhJxoN2d+olxJAeT08LF8cVZ6DQ8Poqu89zIptqO6zAXoIxpGNWYE" crossorigin="anonymous"></script>
     <script>
