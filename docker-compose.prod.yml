@@ -44,57 +44,83 @@ services:
       - ddb-data:/home/dynamodblocal/data
     restart: "no"
 
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: ["server", "/data", "--console-address", ":9001"]
+  # S3-compatible attachment store. MinIO's images were withdrawn from Docker
+  # Hub and quay.io, so this is SeaweedFS (single-node `weed server` + S3 API).
+  # Identities are rendered from env at startup: the admin key (bucket
+  # creation only, used by s3-init), the app key (read/write on the asset
+  # bucket only), and anonymous read limited to the IMAGE/ and DATA/ prefixes.
+  # -ip.bind=0.0.0.0 lets docker's port forwarding reach the S3 port; the
+  # master/volume/filer ports stay unpublished, reachable only on the
+  # compose-internal network (same trust boundary as DynamoDB Local above).
+  s3:
+    image: chrislusf/seaweedfs:4.00
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env.production}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env.production}
-    volumes:
-      - minio-data:/data
-    ports:
-      # Published for asset delivery via the host reverse proxy.
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
-    healthcheck:
-      # mc is the maintainer-recommended check: it doesn't depend on curl
-      # being bundled in the image (removed from some MinIO releases).
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-      start_period: 10s
-    restart: unless-stopped
-
-  minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env.production}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env.production}
-      MINIO_APP_USER: ${MINIO_APP_USER:?set in .env.production}
-      MINIO_APP_PASSWORD: ${MINIO_APP_PASSWORD:?set in .env.production}
+      S3_ADMIN_ACCESS_KEY: ${S3_ADMIN_ACCESS_KEY:?set in .env.production}
+      S3_ADMIN_SECRET_KEY: ${S3_ADMIN_SECRET_KEY:?set in .env.production}
+      S3_APP_ACCESS_KEY: ${S3_APP_ACCESS_KEY:?set in .env.production}
+      S3_APP_SECRET_KEY: ${S3_APP_SECRET_KEY:?set in .env.production}
       ASSET_S3_BUCKET: ${ASSET_S3_BUCKET:-algodoo-assets}
     entrypoint: ["/bin/sh", "-c"]
     # Anonymous download is a deliberate decision: this bucket serves ONLY
     # public assets (legacy board attachments), and every key the app writes
     # lives under the IMAGE/ (images) or DATA/ (.phz/.phn scenes + thumbnails)
     # prefixes — see packages/data/src/algodoo_data/uploads.py. The anonymous
-    # policy is scoped to exactly those prefixes so nothing else ever becomes
-    # publicly readable. Any future private data needs a separate bucket (or
-    # presigned URLs), never this one. If upgrading an existing deployment
-    # that had the old bucket-wide policy, clear it once with:
-    #   mc anonymous set none local/<bucket>
+    # identity is scoped to exactly those prefixes (no listing) so nothing
+    # else ever becomes publicly readable. Any future private data needs a
+    # separate bucket (or presigned URLs), never this one.
     command:
-      - >
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
-        mc mb --ignore-existing "local/$$ASSET_S3_BUCKET" &&
-        mc anonymous set download "local/$$ASSET_S3_BUCKET/IMAGE" &&
-        mc anonymous set download "local/$$ASSET_S3_BUCKET/DATA" &&
-        mc admin user add local "$$MINIO_APP_USER" "$$MINIO_APP_PASSWORD" &&
-        mc admin policy attach local readwrite --user "$$MINIO_APP_USER"
+      - |
+        umask 077
+        cat > /tmp/s3.json <<JSON
+        {"identities": [
+          {"name": "admin",
+           "credentials": [{"accessKey": "$$S3_ADMIN_ACCESS_KEY", "secretKey": "$$S3_ADMIN_SECRET_KEY"}],
+           "actions": ["Admin", "Read", "Write", "List", "Tagging"]},
+          {"name": "app",
+           "credentials": [{"accessKey": "$$S3_APP_ACCESS_KEY", "secretKey": "$$S3_APP_SECRET_KEY"}],
+           "actions": ["Read:$$ASSET_S3_BUCKET", "Write:$$ASSET_S3_BUCKET", "List:$$ASSET_S3_BUCKET"]},
+          {"name": "anonymous",
+           "actions": ["Read:$$ASSET_S3_BUCKET/IMAGE/*", "Read:$$ASSET_S3_BUCKET/DATA/*"]}
+        ]}
+        JSON
+        exec weed server -dir=/data -ip.bind=0.0.0.0 -s3 -s3.port=8333 -s3.config=/tmp/s3.json
+    volumes:
+      - s3-data:/data
+    ports:
+      # Published for asset delivery via the host reverse proxy.
+      - "127.0.0.1:9000:8333"
+    healthcheck:
+      # Any HTTP answer from the S3 port (403 for an anonymous bucket list)
+      # means the gateway is serving.
+      test: ["CMD-SHELL", "wget -q -S -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q 'HTTP/'"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    restart: unless-stopped
+
+  s3-init:
+    image: amazon/aws-cli:2.27.0
+    depends_on:
+      s3:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ADMIN_ACCESS_KEY:?set in .env.production}
+      AWS_SECRET_ACCESS_KEY: ${S3_ADMIN_SECRET_KEY:?set in .env.production}
+      AWS_DEFAULT_REGION: us-east-1
+      ASSET_S3_BUCKET: ${ASSET_S3_BUCKET:-algodoo-assets}
+    entrypoint: ["/bin/sh", "-c"]
+    # The filer may still be warming up right after the S3 port answers.
+    command:
+      - |
+        for _ in $$(seq 1 30); do
+          if aws --endpoint-url http://s3:8333 s3api head-bucket --bucket "$$ASSET_S3_BUCKET" 2>/dev/null \
+            || aws --endpoint-url http://s3:8333 s3api create-bucket --bucket "$$ASSET_S3_BUCKET" >/dev/null; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
     restart: "no"
 
   app:
@@ -106,13 +132,13 @@ services:
       # insecure cookies). CI overrides this via --env-file .env.ci (APP_ENV=ci).
       APP_ENV: ${APP_ENV:-production}
       DDB_ENDPOINT_URL: http://dynamodb:8000
-      ASSET_S3_ENDPOINT_URL: http://minio:9000
+      ASSET_S3_ENDPOINT_URL: http://s3:8333
       # DynamoDB Local validates the access-key format, so it gets an AWS-shaped
-      # dummy; the asset store authenticates against MinIO with its own user.
+      # dummy; the asset store authenticates with its own app key.
       AWS_ACCESS_KEY_ID: LOCALDDBACCESSKEY
       AWS_SECRET_ACCESS_KEY: localddbsecret
-      ASSET_S3_ACCESS_KEY_ID: ${MINIO_APP_USER:?set in .env.production}
-      ASSET_S3_SECRET_ACCESS_KEY: ${MINIO_APP_PASSWORD:?set in .env.production}
+      ASSET_S3_ACCESS_KEY_ID: ${S3_APP_ACCESS_KEY:?set in .env.production}
+      ASSET_S3_SECRET_ACCESS_KEY: ${S3_APP_SECRET_KEY:?set in .env.production}
       # Trust X-Forwarded-* only from the compose network gateway: the host
       # reverse proxy (Caddy) reaches the loopback-published port through
       # docker's NAT, so its connections appear to come from the gateway of
@@ -125,15 +151,15 @@ services:
     depends_on:
       dynamodb:
         condition: service_healthy
-      minio:
+      s3:
         condition: service_healthy
-      minio-init:
+      s3-init:
         condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:
   ddb-data:
-  minio-data:
+  s3-data:
   app-media:
 
 networks:

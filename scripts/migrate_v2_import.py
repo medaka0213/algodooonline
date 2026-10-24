@@ -22,7 +22,7 @@ Examples:
 
 S3 assets are migrated separately (keys are unchanged):
     aws s3 sync s3://img.algodooonline.net ./assets-dump
-    mc mirror ./assets-dump local/algodoo-assets
+    aws --endpoint-url http://127.0.0.1:9000 s3 sync ./assets-dump s3://algodoo-assets
 """
 
 from __future__ import annotations

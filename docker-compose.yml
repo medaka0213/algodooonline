@@ -213,6 +213,72 @@ services:
       - .:/app
       - uv-cache:/root/.cache/uv
 
+  # Production-parity Lambda test: integration-lambda builds dist/lambda (the
+  # zip's tree), which the official Lambda Python runtime (Runtime Interface
+  # Emulator) serves behind an API Gateway HTTP API (payload 2.0) stand-in;
+  # then scripts/integration_local.py runs against it unchanged.
+  lambda:
+    image: public.ecr.aws/lambda/python:3.12
+    profiles: ["test-lambda"]
+    command: ["algodoo_web.lambda_handler.handler"]
+    environment:
+      AWS_REGION: ap-northeast-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      DDB_TABLE_NAME: algodoo-main-lambda
+      DDB_ENDPOINT_URL: http://dynamodb:8000
+      ASSET_S3_BUCKET: algodoo-assets-lambda
+      ASSET_S3_ENDPOINT_URL: http://s3:8000
+      ASSET_PUBLIC_BASE_URL: http://localhost:8002/algodoo-assets-lambda
+      ASSET_S3_PUBLIC_ACL: "true"
+      SEED_DEMO_DATA: "true"
+      LEGACY_X_API_KEY: local-x-api-key
+      # Lambda's filesystem is read-only outside /tmp.
+      MEDIA_ROOT: /tmp/media
+      # The build tree is mounted via its parent directory: build_lambda.sh
+      # rewrites dist/lambda, which would leave a direct bind mount stale.
+      PYTHONPATH: /opt/dist/lambda
+    volumes:
+      - ./dist:/opt/dist:ro
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+
+  lambda-gateway:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    profiles: ["test-lambda"]
+    command: ["python3", "/app/scripts/lambda_gateway.py"]
+    environment:
+      LAMBDA_INVOKE_URL: http://lambda:8080/2015-03-31/functions/function/invocations
+    volumes:
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      - lambda
+
+  integration-lambda:
+    <<: *dev-image
+    profiles: ["test-lambda"]
+    working_dir: /app
+    command:
+      [
+        "sh",
+        "-c",
+        "sh scripts/build_lambda.sh && uv sync --all-packages && uv run python scripts/wait_http.py http://lambda-gateway:8000/healthz && uv run python scripts/integration_local.py",
+      ]
+    environment:
+      BASE_URL: http://lambda-gateway:8000
+      S3_INTERNAL_BASE_URL: http://s3:8000/algodoo-assets-lambda
+      ASSET_PUBLIC_BASE_URL: http://localhost:8002/algodoo-assets-lambda
+      LEGACY_X_API_KEY: local-x-api-key
+      UV_LINK_MODE: copy
+    depends_on:
+      - lambda-gateway
+    volumes:
+      - .:/app
+      - uv-cache:/root/.cache/uv
+
 volumes:
   uv-cache:
   playwright-browsers:

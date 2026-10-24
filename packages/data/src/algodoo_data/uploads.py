@@ -11,7 +11,7 @@ import zipfile
 from algodoo_domain.models import LegacyRoute
 
 # Maximum decoded size of a single Data-URL payload (OWASP A04, issue #19).
-# Data-URL contents are persisted to S3/MinIO or the local media dir (only the
+# Data-URL contents are persisted to S3 (or an S3-compatible store) or the local media dir (only the
 # storage key goes into DynamoDB), so a 10 MB cap comfortably covers PHZ scenes
 # and JPEG uploads while bounding memory used by base64 decoding.
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024

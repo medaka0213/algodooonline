@@ -38,19 +38,20 @@
 - DynamoDBのアクセス層は `DynamoDB-SingleTable` を使う。
 - `DynamoDB-SingleTable` は別リポジトリなので、このリポジトリにvendoringしてコミットしない。
 - 旧DynamoDBの4テーブル構成からsingle-tableへ移行できるように、ID・旧v1属性・移行状態を保持する。
-- デプロイ先は Linux ホスト上の Docker Compose セルフホスト構成にする（詳細は直後の「本番構成」節）。
+- デプロイ先は AWS サーバーレス構成にする（詳細は直後の「本番構成」節）。
 - ローカルでは Docker Compose だけで画面・認証代替・DynamoDB互換ストア・APIの結合試験を完結させる。
 
-本番構成は「Linuxホスト上のDocker Composeによるセルフホスト + 実Cognito」を正とする（2026-07 決定）。
+本番構成は「AWS サーバーレス（Lambda + API Gateway HTTP API + DynamoDB on-demand + 既存S3 + 既存Cognito）」を正とする（2026-10 決定。2026-07 の compose セルフホスト決定を置き換える）。アクセスが無いときに課金されるのはストレージ（DynamoDB・S3・ログ）だけであること。常時課金のリソース（ALB、NAT Gateway、プロビジョンドキャパシティ、Secrets Manager、KMS CMK 等）を使わない。
 
-- FastAPI app: 自前ビルドのDockerイメージ（`Dockerfile`）を `docker-compose.prod.yml` で常駐させる
-- 公開入口: ホスト側リバースプロキシ（nginx/Caddy）でTLS終端し `127.0.0.1:8080` へ（`deploy/Caddyfile.example`）
-- 認証: Amazon Cognito User Pool（`AUTH_BACKEND=cognito`。ローカル・CIは `local` 擬似セッション）
-- DB: compose同梱の DynamoDB Local（永続ボリューム）。アプリコードは `boto3 + ddb_single` のまま
-- ファイル: compose同梱の MinIO（S3互換、匿名downloadポリシー + `ASSET_PUBLIC_BASE_URL` 直配信）
-- ローカルDynamoDB互換: Docker Compose 内の moto。アプリコードは本番と同じ `boto3 + ddb_single` 経由にする
+- FastAPI app: `scripts/build_lambda.sh` で作る zip を Lambda（python3.12、Mangum、`algodoo_web.lambda_handler.handler`）で動かす
+- 公開入口: API Gateway HTTP API（payload 2.0）の regional カスタムドメイン `algodooonline.net` / `www.algodooonline.net`（ACM 証明書）。DNS 切替は `scripts/cutover_dns.sh`
+- 認証: 既存の Cognito User Pool `AlgonTest`（ユーザーは維持）に新アプリ用 App Client を追加（`AUTH_BACKEND=cognito`。ローカル・CIは `local` 擬似セッション）
+- DB: DynamoDB on-demand の single-table（`algodoo-main`。スキーマは IaC 管理で `DDB_AUTO_CREATE=false`）。アプリコードは `boto3 + ddb_single` のまま
+- ファイル: 既存の S3 bucket `img.algodooonline.net`（公開read ACL、既存 CloudFront 配信）をそのまま使う。キー規約が同じため移行不要
+- IaC: `infra/aws`（Terraform）
+- ローカルDynamoDB互換: Docker Compose 内の moto。アプリコードは本番と同じ `boto3 + ddb_single` 経由にする。Lambda パッケージは `test-lambda` プロファイルで Lambda 公式ランタイム上の結合試験を行う
 
-旧推奨だったAWSサーバーレス構成（Lambda + Mangum + API Gateway + DynamoDB on-demand + S3）は将来の選択肢として残すが、現行コードはcompose常駐前提でMangumを持たない。
+`docker-compose.prod.yml` によるセルフホスト構成は代替手段として残す。
 
 ## 3. ルートと掲示板種別
 
@@ -671,6 +672,8 @@ Docker Compose 起動後に、ブラウザまたはHTTPテストだけで以下�
 - single-tableを使い、通常データ操作で `ddb_single` を迂回していない。
 
 結合テストは `scripts/integration_local.py` で自動化する。画面仕様を変えた場合は同時にこのテストを更新する。
+
+本番パッケージ（Lambda zip）でも同じ `scripts/integration_local.py` が通ること。`docker compose --profile test-lambda up --abort-on-container-exit --exit-code-from integration-lambda` が zip をビルドし、Lambda 公式ランタイム（Runtime Interface Emulator）と HTTP API 相当のアダプタ（`scripts/lambda_gateway.py`）越しに実行する。
 
 `scripts/integration_local.py` はHTTPレベルの検証であり、実ブラウザでのクリック・入力・EasyMDE・ファイルドロップ・モーダル開閉までは検証しない。上記条件を実ブラウザで確認する自動テストは `tests/e2e`（Playwright/pytest-playwright）に置く。ローカルは `docker compose --profile e2e up --abort-on-container-exit --exit-code-from e2e`、GitHub Actionsも同じプロファイルを実行する。画面仕様を変えた場合は `tests/e2e` も同時に更新する。
 

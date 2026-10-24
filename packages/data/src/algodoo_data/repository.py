@@ -10,6 +10,7 @@ from operator import attrgetter
 from algodoo_domain.models import LegacyRoute, Like, LikeType, Log, Thread, UserProfile
 from ddb_single import Query
 
+from algodoo_data.config import get_data_settings
 from algodoo_data.single_table import (
     TABLE,
     LikeRecord,
@@ -107,6 +108,10 @@ def query() -> Query:
 
 
 def init_table() -> None:
+    if not get_data_settings().auto_create_table:
+        # Provisioned by IaC (infra/aws); fail fast instead of retrying a cold start.
+        TABLE.init(create_if_not_exists=False)
+        return
     last_error: Exception | None = None
     for _ in range(30):
         try:
