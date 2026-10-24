@@ -1,0 +1,171 @@
+# CodeRabbit 設定
+# リファレンス: https://docs.coderabbit.ai/reference/configuration
+#
+# このファイルが無い、または reviews.auto_review.enabled が false のままだと、
+# PR のたびに "Review skipped / Auto reviews are disabled on this repository"
+# となり自動レビューが走らない。ここでは自動レビューを有効にしたうえで、
+# このリポジトリ固有の確認観点（SPEC.md との一致、DynamoDB の単一テーブル、
+# 添付ファイル、Terraform、ローカル統合テスト）をレビューに渡す。
+
+language: ja-JP
+early_access: false
+tone_instructions: "日本語で簡潔に。好みのスタイルより、バグ・仕様逸脱・セキュリティ・データ損失のリスクを優先し、根拠となるファイルと行を示す。"
+
+reviews:
+  # chill: 重要な指摘に絞りつつ、必要な確認は落とさない
+  profile: chill
+  review_status: true
+  review_details: false
+  high_level_summary: true
+  high_level_summary_in_walkthrough: false
+  collapse_walkthrough: true
+  changed_files_summary: true
+  estimate_code_review_effort: true
+  related_issues: true
+  related_prs: true
+  # ラベル・レビュワーはこのリポジトリでは運用していないので提案しない
+  suggested_labels: false
+  auto_apply_labels: false
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+  poem: false
+  abort_on_close: true
+
+  auto_review:
+    # これが自動レビューの本体。既定のままでも true だが、明示しておく
+    enabled: true
+    # push のたびに差分を再レビューする
+    auto_incremental_review: true
+    # draft のうちはレビューしない（ready for review で走る）
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "wip"
+      - "Draft"
+      - "DO NOT MERGE"
+      - "do not merge"
+
+  # レビュー対象から外すもの（生成物・ロックファイル・バイナリ）
+  path_filters:
+    - "!uv.lock"
+    - "!dist/**"
+    - "!**/test-results/**"
+    - "!docs/screenshots/**"
+    - "!**/*.min.js"
+    - "!**/*.min.css"
+
+  path_instructions:
+    - path: "apps/web/**"
+      instructions: |
+        - SPEC.md の画面・ルート・API ペイロードとの一致を最優先で確認する。実装都合で画面や API の形を変えていたら指摘する。
+        - Jinja2 の自動エスケープを崩していないか（`|safe` の追加、`Markup` の使用、HTML 文字列の組み立て）を確認する。
+        - フォームはサーバー側レンダリングが基本。クライアント JS を足す場合は、JS 無効時・二重送信時・戻るボタン時の挙動も確認する。
+        - Cookie セッションの扱い、認証・認可のバイパス、他人のスレッドや返信を操作できる穴がないか確認する。
+        - 添付ファイルはサイズ上限（1 ファイル 10MB、フォーム本文 4,500,000 バイト既定）、MIME、保存先、パストラバーサルを確認する。
+        - DynamoDB へのアクセスが packages/data のリポジトリ関数を経由しているか確認する。ルートから boto3 を直接呼んでいたら指摘する。
+    - path: "packages/data/**"
+      instructions: |
+        - 単一テーブル設計の PK/SK・GSI の組み立てが既存データと後方互換か確認する。
+        - `ddb_single` を迂回した生の boto3 呼び出しを追加していないか確認する。
+        - ページネーション（LastEvaluatedKey）、条件付き書き込み、同時更新時の競合を確認する。
+        - キー変更や削除など破壊的な変更には、PR 本文にマイグレーション手順があるか確認する。
+    - path: "packages/domain/**"
+      instructions: |
+        - ドメインの不変条件と入力検証（空文字、長さ、列挙値、None）が保たれているか確認する。
+    - path: "tests/**"
+      instructions: |
+        - 追加・変更したユーザー向け挙動に対応するテストがあるか確認する。
+        - Playwright テストは実ブラウザで安定して通る形か（固定 sleep ではなく待機条件、失敗時のスクリーンショット取得）を確認する。
+        - テストを通すために本番コードの検証を弱めていないか確認する。
+    - path: "scripts/**"
+      instructions: |
+        - scripts/integration_local.py が、新しい画面・フォーム・API の挙動を検証しているか確認する（AGENTS.md のルール）。
+        - シェルスクリプトは `set -euo pipefail`、変数のクォート、失敗時の後始末を確認する。
+    - path: "infra/**"
+      instructions: |
+        - Terraform の差分が既存リソースの置き換え（force replacement）や本番データの破壊につながらないか確認する。
+        - IAM が最小権限か、`*` のリソース指定が妥当か確認する。
+        - API Gateway / Lambda の制限（ペイロード約 4.5MB、タイムアウト、同時実行）とアプリ側の上限値が一致しているか確認する。
+    - path: ".github/workflows/**"
+      instructions: |
+        - `permissions` が最小権限か、サードパーティ Action がコミット SHA で固定されているか確認する。
+        - シークレットがログや PR コメントに出力されないか確認する。
+    - path: "docs/**"
+      instructions: |
+        - 実装と説明がずれていないか（コマンド、環境変数、上限値、デプロイ手順）を確認する。
+    - path: "SPEC.md"
+      instructions: |
+        - SPEC.md はレガシー挙動の正。実装と食い違う変更は、SPEC 側の更新漏れか、意図しない仕様変更かを区別して指摘する。
+
+  pre_merge_checks:
+    # 既存コードに docstring が少ないため、カバレッジは求めない
+    docstrings:
+      mode: "off"
+    title:
+      mode: warning
+      requirements: "変更内容が分かる日本語のタイトル。長すぎず、PR 本文を読まなくても差分の対象が想像できること。"
+    description:
+      mode: warning
+    issue_assessment:
+      mode: "off"
+    custom_checks:
+      - name: "挙動変更のテストと仕様更新"
+        mode: warning
+        instructions: |
+          ユーザーに見える挙動（画面、ルート、API、フォーム、添付ファイル、認証）を変える PR は、次を満たすこと。
+          1. scripts/integration_local.py または tests/e2e に、その挙動に対応する確認がある（AGENTS.md のルール）。
+          2. 仕様そのものを変える場合、SPEC.md の該当節が更新されている。
+          欠けている場合は、どちらが欠けているかを名指しして警告する。
+
+  tools:
+    ruff:
+      enabled: true
+      config_file: pyproject.toml
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    hadolint:
+      enabled: true
+    tflint:
+      enabled: true
+    checkov:
+      enabled: true
+    trivy:
+      enabled: true
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    yamllint:
+      enabled: true
+    dotenvLint:
+      enabled: true
+    # Python は ruff に一本化（CI も ruff のみ）。flake8 / pylint は重複するので切る
+    flake8:
+      enabled: false
+    pylint:
+      enabled: false
+    # 日本語の Markdown が多く、markdownlint の指摘がノイズになりやすい
+    markdownlint:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  web_search:
+    enabled: true
+  # 公開リポジトリなので、このリポジトリの学習・Issue・過去 PR だけを参照する
+  learnings:
+    scope: local
+  issues:
+    scope: local
+  pull_requests:
+    scope: local
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/AGENTS.md"
