@@ -75,3 +75,15 @@ variable "log_retention_days" {
   type    = number
   default = 14
 }
+
+variable "github_repo" {
+  description = "GitHub repository (owner/name) allowed to deploy through OIDC."
+  type        = string
+  default     = "medaka0213/algodooonline"
+}
+
+variable "github_deploy_branch" {
+  description = "Only workflow runs on this branch can assume the deploy role."
+  type        = string
+  default     = "main"
+}

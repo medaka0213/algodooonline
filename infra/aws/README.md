@@ -11,6 +11,7 @@
 | 添付 | 既存 S3 `img.algodooonline.net`（Terraform 管理外。IAM で `IMAGE/*`・`DATA/*` への Put のみ許可） | ストレージのみ（既存） |
 | 認証 | 既存 Cognito `AlgonTest` に App Client `algodooonline-web` を追加（プールは管理外） | 0 |
 | ログ | CloudWatch Logs（Lambda・アクセスログ、保持 14 日） | ストレージのみ |
+| 自動デプロイ | GitHub OIDC プロバイダ + IAM ロール `algodooonline-github-deploy`（Lambda のコード更新だけ許可） | 0 |
 
 使わないもの: ALB、NAT Gateway、VPC、プロビジョンドキャパシティ、Secrets Manager、KMS CMK、ECR。`LEGACY_X_API_KEY` は `random_password` で生成し Lambda 環境変数（AWS 管理キーで暗号化）に入れます。最悪時の課金は HTTP API のスロットリング（既定 20 req/s・burst 50）で頭打ちにします。
 
@@ -26,6 +27,34 @@ terraform -chdir=infra/aws apply
 ```
 
 この時点では DNS は旧 CloudFront のままです。`terraform output invoke_url` の execute-api URL で動作確認できます（Cookie は `Secure`、ログインは実 Cognito）。
+
+## 自動デプロイ（main へのマージ）
+
+`main` への push で、`.github/workflows/ci.yml` の `deploy` ジョブが Lambda のコードだけを差し替えます。インフラ（IAM・API Gateway・DynamoDB など）は自動では変わらず、これまでどおり手元で `terraform plan` を見てから `apply` します。
+
+流れ: 全テスト通過 → `lambda` ジョブでテスト済みの zip を artifact に保存 → `deploy` ジョブが OIDC でロール `algodooonline-github-deploy` を引き受け → `update-function-code` → ハッシュ照合 → 本番ドメインのスモークテスト（`/healthz`、`/i/BBS`、ホーム）。zip のハッシュが本番と同じなら（ドキュメントだけの変更など）何もせず終了します。
+
+- 認証は GitHub OIDC で、アクセスキーは GitHub に置きません。ロールを引き受けられるのは `medaka0213/algodooonline` の `main` ブランチ上の実行だけで、権限は `algodooonline-web` への `lambda:UpdateFunctionCode` と `lambda:GetFunction` に限っています。
+- Lambda は `ignore_changes = [filename, source_code_hash]` にしてあり、CI がコードを更新しても `terraform plan` に差分は出ません。plan 時に zip ファイルは必要です（どのビルドでも構いません）。
+- 同時に走るデプロイは 1 つだけです。後のマージは先のデプロイが終わるまで待ちます。
+
+### 有効化（初回のみ）
+
+`deploy` ジョブはリポジトリ変数 `AWS_DEPLOY_ROLE_ARN` が空のあいだ実行されません（スキップ）。ロールを作ってから変数を設定すると有効になります。
+
+```bash
+terraform -chdir=infra/aws apply        # OIDC プロバイダ・ロール・ポリシーを作成
+gh variable set AWS_DEPLOY_ROLE_ARN --repo medaka0213/algodooonline \
+  --body "$(terraform -chdir=infra/aws output -raw github_deploy_role_arn)"
+```
+
+OIDC プロバイダはアカウントに 1 つしか作れません。別のスタックが先に作った場合は、`terraform import` で取り込んでください。
+
+### 止めたいとき・戻したいとき
+
+- 自動デプロイを止める：リポジトリ変数 `AWS_DEPLOY_ROLE_ARN` を削除する（`gh variable delete AWS_DEPLOY_ROLE_ARN`）。
+- 問題のあるデプロイを戻す：問題のコミットを revert してマージする（数分で前のコードに戻る）。急ぐときは、以前に成功した Actions の `main` の実行を再実行する。
+- `main` に直接 push できると、PR の CI を通さずにデプロイされます。「PR 必須 + CI の通過必須」のブランチ保護を GitHub で設定してください。
 
 ## 切替手順（本番）
 

@@ -33,3 +33,8 @@ output "legacy_x_api_key" {
   value     = random_password.legacy_x_api_key.result
   sensitive = true
 }
+
+output "github_deploy_role_arn" {
+  description = "Set as the AWS_DEPLOY_ROLE_ARN repository variable to enable the deploy job."
+  value       = aws_iam_role.github_deploy.arn
+}

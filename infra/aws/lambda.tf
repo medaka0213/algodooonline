@@ -98,5 +98,13 @@ resource "aws_lambda_function" "web" {
     }
   }
 
+  # Code is deployed by the GitHub Actions deploy job (update-function-code) on
+  # every merge to main; Terraform owns everything else about the function.
+  # The zip must still exist when planning (any build will do): the file is
+  # only used to create the function the first time.
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
+
   depends_on = [aws_iam_role_policy.lambda, aws_cloudwatch_log_group.lambda]
 }
