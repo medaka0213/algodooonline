@@ -6,521 +6,21 @@
     <title>AlgodooOnline [ver 2.0]</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css" integrity="sha384-uqD/OYCNfagd1EgXMgl5QedTD5K+B3e9b8GYo/41t7+Serf7CBxvl+tU1gHd+qd1" crossorigin="anonymous" />
     <style>
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        color: #212529;
-        background: #fff;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
-          "Yu Gothic", Meiryo, sans-serif;
-        font-size: 16px;
-        line-height: 1.5;
-      }
-      a { color: #007bff; text-decoration: none; }
-      a:hover { color: #0056b3; text-decoration: underline; }
-      button, input, textarea, select { font: inherit; }
-      .navbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        padding: .5rem 1rem;
-        background: #f8f9fa;
-      }
-      .navbar-left, .navbar-right, .nav-links { display: flex; align-items: center; gap: 1rem; }
-      .navbar-brand { color: rgba(0, 0, 0, .9); font-size: 1.25rem; white-space: nowrap; }
-      .dropdown { position: relative; }
-      .dropdown summary {
-        list-style: none;
-        cursor: pointer;
-        color: rgba(0, 0, 0, .6);
-      }
-      .dropdown summary::-webkit-details-marker { display: none; }
-      .dropdown[open] .dropdown-menu { display: block; }
-      .dropdown-menu {
-        display: none;
-        position: absolute;
-        z-index: 20;
-        min-width: 12rem;
-        margin-top: .5rem;
-        padding: .5rem 0;
-        background: #fff;
-        border: 1px solid rgba(0, 0, 0, .15);
-        border-radius: .25rem;
-        box-shadow: 0 .5rem 1rem rgba(0, 0, 0, .12);
-      }
-      .dropdown-menu.right { right: 0; }
-      .dropdown-item {
-        display: block;
-        width: 100%;
-        padding: .25rem 1.5rem;
-        color: #212529;
-        background: transparent;
-        border: 0;
-        text-align: left;
-        white-space: nowrap;
-        cursor: pointer;
-      }
-      .dropdown-item:hover { background: #f8f9fa; text-decoration: none; }
-      .dropdown-divider {
-        height: 0;
-        margin: .5rem 0;
-        overflow: hidden;
-        border-top: 1px solid #e9ecef;
-      }
-      .container {
-        width: 100%;
-        margin: 0 auto;
-        padding: 1rem;
-        border-left: 1px solid #dee2e6;
-        border-right: 1px solid #dee2e6;
-      }
-      @media (min-width: 576px) { .container { max-width: 540px; } }
-      @media (min-width: 768px) { .container { max-width: 720px; } }
-      @media (min-width: 992px) { .container { max-width: 960px; } }
-      @media (min-width: 1200px) { .container { max-width: 1140px; } }
-      .p-3 { padding: 1rem; }
-      .border-right { border-right: 1px solid #dee2e6; }
-      .border-left { border-left: 1px solid #dee2e6; }
-      .breadcrumb {
-        display: flex;
-        flex-wrap: wrap;
-        gap: .5rem;
-        margin: 0 0 1rem;
-        padding: .75rem 1rem;
-        list-style: none;
-        background: #e9ecef;
-        border-radius: .25rem;
-      }
-      .breadcrumb li + li::before { content: "/"; margin-right: .5rem; color: #6c757d; }
-      .breadcrumb .active { color: #6c757d; }
-      .home-title {
-        margin: 2rem 0 1rem;
-        color: #ff8c00;
-        font-size: 32px;
-        font-weight: 700;
-        text-align: center;
-      }
-      .home-status { text-align: center; margin-bottom: 1rem; }
-      .index-nav {
-        max-width: 560px;
-        margin: 0 auto;
-        padding: 1rem;
-        border: 1px solid #dee2e6;
-      }
-      .index-list {
-        display: block;
-        margin: .75rem 0;
-        padding: 1rem;
-        color: #212529;
-        border: 1px solid #dee2e6;
-        border-radius: .25rem;
-      }
-      .index-list:hover { opacity: .7; text-decoration: none; }
-      .auth-card {
-        max-width: 380px;
-        margin: 1.5rem auto 0;
-        padding: 1.5rem;
-        background: #f8f9fa;
-        border: 1px solid #dee2e6;
-      }
-      .auth-card h1 { margin-top: 0; font-size: 1.5rem; }
-      .form-group { margin-bottom: 1rem; }
-      label { display: block; margin-bottom: .35rem; font-weight: 600; }
-      .form-control {
-        display: block;
-        width: 100%;
-        min-height: 38px;
-        padding: .375rem .75rem;
-        color: #495057;
-        background: #fff;
-        border: 1px solid #ced4da;
-        border-radius: .25rem;
-      }
-      textarea.form-control { min-height: 9rem; resize: vertical; }
-      .btn {
-        display: inline-block;
-        min-height: 38px;
-        padding: .375rem .75rem;
-        color: #212529;
-        background: #fff;
-        border: 1px solid #ced4da;
-        border-radius: .25rem;
-        cursor: pointer;
-        text-align: center;
-      }
-      .btn-primary { color: #fff; background: #007bff; border-color: #007bff; }
-      .btn-danger { color: #fff; background: #dc3545; border-color: #dc3545; }
-      .btn-outline-secondary { color: #6c757d; background: #fff; border-color: #6c757d; }
-      .btn-sm { min-height: 30px; padding: .25rem .5rem; font-size: .875rem; }
-      .text-danger { color: #dc3545; }
-      .form-error { color: #dc3545; white-space: pre-wrap; }
-      .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .75rem 0; }
-      .search-form {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 0;
-        row-gap: 1rem;
-        margin: 1.5rem 0;
-      }
-      .search-form input {
-        border-top-right-radius: 0;
-        border-bottom-right-radius: 0;
-      }
-      .search-form button {
-        border-top-left-radius: 0;
-        border-bottom-left-radius: 0;
-      }
-      .sort-select {
-        grid-column: 1 / 2;
-        width: 50%;
-        min-width: 240px;
-      }
-      .thread-item {
-        display: grid;
-        grid-template-columns: 8.333333% minmax(0, 1fr);
-        gap: 0;
-        margin: 1.5rem 0;
-        color: #212529;
-        border-top: 1px solid #dee2e6;
-        border-bottom: 1px solid #dee2e6;
-      }
-      .thread-item.has-preview {
-        grid-template-columns: 16.666667% 8.333333% minmax(0, 1fr);
-      }
-      .thread-preview {
-        display: block;
-        width: 100%;
-        height: 100%;
-        max-height: 200px;
-        object-fit: cover;
-      }
-      .thread-link {
-        position: relative;
-        display: block;
-        width: 100%;
-        color: #212529;
-      }
-      .thread-link:hover {
-        opacity: .5;
-        text-decoration: none;
-      }
-      .thread-item-body { padding: 1rem 0 1rem .25rem; }
-      .like-box {
-        min-width: 2.4rem;
-        margin: 1rem .5rem;
-        text-align: center;
-        color: #aaa;
-      }
-      .like-button {
-        display: block;
-        width: 20px;
-        height: 20px;
-        margin: 0 auto .25rem;
-        padding: 0;
-        color: #aaa;
-        background: transparent;
-        border: 0;
-        line-height: 0;
-        cursor: pointer;
-      }
-      .like-button.is-liked {
-        color: #00ff88;
-      }
-      .like-icon {
-        display: block;
-        width: 20px;
-        height: 20px;
-        margin: 0;
-        fill: currentColor;
-      }
-      .like-score {
-        display: block;
-        color: #6c757d;
-        font-size: 80%;
-        font-weight: 400;
-        line-height: 1.5;
-      }
-      .thread-title { margin: 0 0 .5rem; font-size: 1.75rem; font-weight: 700; }
-      .meta {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: flex-end;
-        gap: .5rem;
-        color: rgba(0, 0, 0, .5);
-      }
-      .meta strong { color: #212529; }
-      .excerpt { margin: .5rem 0 0; color: #495057; overflow-wrap: anywhere; }
-      .post-row {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
-        gap: 1rem;
-        margin: 1rem 0 1.5rem;
-      }
-      .post-detail {
-        margin-bottom: 1.5rem;
-      }
-      .post-detail h1 {
-        margin: 1rem 0;
-        font-size: 2.5rem;
-        font-weight: 700;
-        line-height: 1.2;
-      }
-      .post-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: .75rem;
-        margin-bottom: 1rem;
-      }
-      .content-plain {
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-      }
-      .markdown-body { overflow-wrap: anywhere; }
-      .markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: .5rem 0; }
-      .slideshow {
-        display: flex;
-        flex-wrap: wrap;
-        gap: .75rem;
-        margin: 1rem 0;
-      }
-      .download-block {
-        display: inline-block;
-        padding: .5rem .75rem;
-        border: 1px solid #dee2e6;
-        border-radius: .25rem;
-        background: #f8f9fa;
-      }
-      .slide-image, .data-thumb {
-        max-width: 240px;
-        max-height: 180px;
-        object-fit: contain;
-        border: 1px solid #dee2e6;
-      }
-      .slideshow-carousel {
-        margin: 1rem 0;
-        max-width: 100%;
-      }
-      .slideshow-carousel .slide-stage {
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: .25rem;
-        min-height: 220px;
-      }
-      .slideshow-carousel .slide-main {
-        max-width: 100%;
-        max-height: 360px;
-        object-fit: contain;
-        margin: 0 2.5rem;
-      }
-      .slideshow-carousel .slide-arrow {
-        position: absolute;
-        top: 50%;
-        transform: translateY(-50%);
-        width: 2.25rem;
-        height: 2.25rem;
-        border: 1px solid #ced4da;
-        border-radius: 50%;
-        background: #fff;
-        font-size: 1.5rem;
-        line-height: 1;
-        cursor: pointer;
-        z-index: 2;
-      }
-      .slideshow-carousel .slide-prev { left: .35rem; }
-      .slideshow-carousel .slide-next { right: .35rem; }
-      .slideshow-carousel .slide-thumbs {
-        display: flex;
-        flex-wrap: wrap;
-        gap: .35rem;
-        margin-top: .5rem;
-        justify-content: center;
-      }
-      .slideshow-carousel .slide-thumb {
-        padding: 0;
-        border: 2px solid transparent;
-        border-radius: .2rem;
-        background: #fff;
-        cursor: pointer;
-        line-height: 0;
-      }
-      .slideshow-carousel .slide-thumb.is-active { border-color: #ffc107; }
-      .slideshow-carousel .slide-thumb img {
-        width: 56px;
-        height: 56px;
-        object-fit: cover;
-        display: block;
-      }
-      .download-phz-wrap { margin: 1rem 0; }
-      .download-phz-hero-thumb {
-        display: block;
-        max-width: min(100%, 420px);
-        max-height: 280px;
-        object-fit: contain;
-        margin-bottom: .75rem;
-        border: 3px solid #ffc107;
-        border-radius: .25rem;
-        padding: .25rem;
-        background: #fffbeb;
-      }
-      .download-phz-link {
-        display: inline-block;
-        padding: .5rem 1rem;
-        border: 3px solid #ffc107;
-        border-radius: .25rem;
-        background: #fff3cd;
-        font-weight: 600;
-      }
-      .download-phz-link:hover { text-decoration: none; background: #ffe69c; }
-      .log-item {
-        padding: 1rem 0;
-        border-top: 1px solid #dee2e6;
-      }
-      .log-body {
-        margin: .75rem 0;
-        overflow-wrap: anywhere;
-        white-space: pre-wrap;
-      }
-      .deleted { color: #adb5bd; }
-      .reply-list {
-        margin: .75rem 0 0 0;
-        padding-left: 1rem;
-        border-left: 3px solid #dee2e6;
-      }
-      .modal-toggle {
-        margin: 0 0 1.5rem;
-      }
-      .modal-toggle > summary {
-        display: block;
-        width: 100%;
-        min-height: 38px;
-        padding: .375rem .75rem;
-        color: #007bff;
-        background: #fff;
-        border: 1px solid #007bff;
-        border-radius: .25rem;
-        cursor: pointer;
-        list-style: none;
-        text-align: center;
-      }
-      .modal-toggle > summary::-webkit-details-marker { display: none; }
-      .modal-toggle > summary:hover { color: #fff; background: #007bff; text-decoration: none; }
-      .modal-toggle.secondary > summary {
-        display: inline-block;
-        width: auto;
-        min-height: 30px;
-        padding: .25rem .5rem;
-        color: #212529;
-        background: #fff;
-        border-color: #ced4da;
-        font-size: .875rem;
-      }
-      .modal-toggle.secondary > summary:hover { color: #212529; background: #f8f9fa; }
-      .modal-shell[hidden] { display: none; }
-      .modal-shell::before,
-      .modal-toggle[open]::before,
-      .log-reply-toggle[open]::before {
-        content: "";
-        position: fixed;
-        inset: 0;
-        z-index: 1000;
-        background: rgba(0, 0, 0, .5);
-      }
-      .log-reply-toggle > summary {
-        list-style: none;
-        cursor: pointer;
-      }
-      .log-reply-toggle > summary:hover { opacity: .5; }
-      .log-reply-toggle > summary::-webkit-details-marker { display: none; }
-      .reply-disclosure > summary {
-        list-style: none;
-        color: #007bff;
-        cursor: pointer;
-      }
-      .reply-disclosure > summary::-webkit-details-marker { display: none; }
-      .modal-body {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        z-index: 1001;
-        width: calc(100% - 2rem);
-        max-width: 800px;
-        max-height: calc(100vh - 3.5rem);
-        margin: 0;
-        padding: 1rem;
-        overflow-y: auto;
-        border: 1px solid rgba(0, 0, 0, .2);
-        border-radius: .3rem;
-        background: #fff;
-        transform: translate(-50%, -50%);
-        box-shadow: 0 .5rem 1rem rgba(0, 0, 0, .25);
-      }
-      .modal-body h2 {
-        margin: -1rem -1rem 1rem;
-        padding: 1rem;
-        border-bottom: 1px solid #dee2e6;
-        font-size: 1.25rem;
-        font-weight: 500;
-      }
-      .modal-log-preview {
-        margin-bottom: 1rem;
-        padding: 1rem;
-        border-top: 1px solid #dee2e6;
-        border-bottom: 1px solid #dee2e6;
-      }
-      .modal-close {
-        float: right;
-        padding: 0;
-        color: #000;
-        background: transparent;
-        border: 0;
-        font-size: 1.5rem;
-        line-height: 1;
-        opacity: .5;
-        cursor: pointer;
-      }
-      .drop-zone {
-        padding: 1rem;
-        border: 2px dashed #ced4da;
-        border-radius: .25rem;
-        background: #f8f9fa;
-        text-align: center;
-      }
-      .file-preview {
-        display: flex;
-        flex-wrap: wrap;
-        gap: .5rem;
-        justify-content: center;
-      }
-      .file-preview img {
-        width: 80px;
-        height: 80px;
-        object-fit: cover;
-        border: 1px solid #ced4da;
-        border-radius: .25rem;
-      }
-      .file-preview:empty { display: none; }
-      .bg-warning { background: #ffc107; }
-      @media (max-width: 720px) {
-        .navbar { align-items: flex-start; flex-direction: column; }
-        .navbar-left, .navbar-right { flex-wrap: wrap; }
-        .thread-item { grid-template-columns: 16.666667% minmax(0, 1fr); }
-        .thread-item.has-preview { grid-template-columns: 16.666667% minmax(0, 1fr); }
-        .thread-preview {
-          grid-column: 1 / -1;
-          width: 100%;
-          height: auto;
-        }
-        .sort-select { width: 100%; }
-      }
+      {% include "styles.css" %}
     </style>
   </head>
   <body>
+    {% macro icon(name) -%}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      {% if name == 'BBS' %}<path d="M20 11.5a8 8 0 0 1-8 8H5l-3 2v-10a9 9 0 0 1 18 0Z"/><path d="M7 10h8M7 14h5"/>
+      {% elif name == 'WIKI' %}<path d="M12 5v15M3 4.5c3-1 6-.5 9 1.5 3-2 6-2.5 9-1.5V19c-3-1-6-.5-9 1.5-3-2-6-2.5-9-1.5Z"/>
+      {% elif name == 'IMAGE' %}<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/>
+      {% elif name == 'DATA' %}<path d="m12 2 9 5-9 5-9-5 9-5Zm-9 5v10l9 5 9-5V7M12 12v10"/>
+      {% elif name == 'arrow' %}<path d="M4 12h16m-6-6 6 6-6 6"/>
+      {% elif name == 'user' %}<circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>
+      {% endif %}
+    </svg>
+    {%- endmacro %}
     {% macro render_log_item(log, active_route, selected_thread, current_user, search_query, responses_by_log, log_like_summary, log_own_likes) %}
       {% set own_log_like = (log_own_likes|default({})).get(log.log_id, {}) %}
       <article class="log-item">
@@ -623,9 +123,10 @@
       </article>
     {% endmacro %}
 
-    <nav class="navbar">
+    <a class="skip-link" href="#main-content">本文へ移動</a>
+    <nav class="navbar" aria-label="メインナビゲーション">
       <div class="navbar-left">
-        <a class="navbar-brand" href="/">AlgodooOnline [ver 2.0]</a>
+        <a class="navbar-brand" href="/"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>AlgodooOnline <span class="brand-version">[ver 2.0]</span></span></a>
         <details class="dropdown">
           <summary>サイトマップ ▾</summary>
           <div class="dropdown-menu">
@@ -638,6 +139,11 @@
           </div>
         </details>
       </div>
+      <div class="nav-links" aria-label="掲示板">
+        {% for code, label in [('BBS', '掲示板'), ('WIKI', 'Wiki'), ('IMAGE', '画像'), ('DATA', 'データ')] %}
+        <a href="/i/{{ code }}"{% if active_route is defined and active_route and active_route.value == code %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </div>
       <div class="navbar-right">
         {% if current_user %}
         <details class="dropdown">
@@ -648,27 +154,62 @@
           </div>
         </details>
         {% else %}
-        <a href="/auth/login">ユーザー認証</a>
+        <a class="auth-link" href="/auth/login">{{ icon('user') }}ユーザー認証</a>
         {% endif %}
       </div>
     </nav>
 
-    <main class="container p-3 border-right border-left">
+    <main id="main-content" class="container p-3 border-right border-left page-{{ page }}">
       {% if page == "home" %}
-      <h1 class="home-title">AlgodooOnline</h1>
-      <p class="home-status">
-        {% if current_user %}ユーザー: {{ current_user.name }} ({{ current_user.sub }}){% else %}ログインしてください{% endif %}
-      </p>
+      <section class="home-hero" aria-labelledby="home-heading">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="status-dot"></span> THE ALGODOO COMMUNITY</p>
+          <h1 id="home-heading" class="home-title">AlgodooOnline</h1>
+          <h2 class="hero-heading">ひらめきを、<br /><span>動かそう。</span></h2>
+          <p class="hero-description">つくって、試して、分かち合う。<br />Algodooを楽しむみんなのコミュニティ。</p>
+          <a class="hero-link" href="/i/BBS">掲示板をのぞいてみる {{ icon('arrow') }}</a>
+        </div>
+        <div class="hero-scene" aria-hidden="true">
+          <div class="scene-caption"><span>THE PLAYGROUND</span><span>01 — ∞</span></div>
+          {% include "physics-scene.svg" %}
+          <div class="scene-caption scene-caption-bottom"><span>A LITTLE CURIOSITY. ENDLESS POSSIBILITIES.</span><span>↗</span></div>
+        </div>
+      </section>
+      <section class="community-section" aria-labelledby="community-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">EXPLORE THE COMMUNITY</p><h2 id="community-heading">好きなところから、はじめよう。</h2></div>
+        <span class="section-note">アイデアがつながる、4つの場所</span>
+      </div>
       <nav class="index-nav" aria-label="掲示板一覧">
-        <a class="index-list" href="/i/BBS">BBS掲示板</a>
-        <a class="index-list" href="/i/WIKI">Wiki</a>
-        <a class="index-list" href="/i/IMAGE">画像掲示板</a>
-        <a class="index-list" href="/i/DATA">Phz/Phnデータ掲示板</a>
+        {% for code, label, category, description in [
+          ('BBS', 'BBS掲示板', 'TALK & CONNECT', '質問も、発見も、気軽な雑談も。みんなと話してみよう。'),
+          ('WIKI', 'Wiki', 'LEARN & DISCOVER', '使い方やテクニックを持ち寄って、できることを増やそう。'),
+          ('IMAGE', '画像掲示板', 'SHOW & INSPIRE', 'お気に入りのシーンや作品を、画像で見せ合おう。'),
+          ('DATA', 'Phz/Phnデータ掲示板', 'MAKE & SHARE', 'シーンを共有して、誰かのアイデアを動かしてみよう。')
+        ] %}
+        <a class="index-list card-{{ code|lower }}" href="/i/{{ code }}" aria-label="{{ label }}">
+          <span class="card-top"><span class="board-icon">{{ icon(code) }}</span><span class="card-number">0{{ loop.index }}</span></span>
+          <span class="card-category">{{ category }}</span>
+          <h3>{{ label }}</h3>
+          <p>{{ description }}</p>
+          <span class="card-bottom"><span>{{ 'PHZ / PHN' if code == 'DATA' else code }}</span>{{ icon('arrow') }}</span>
+        </a>
+        {% endfor %}
       </nav>
+      </section>
+      <aside class="community-welcome">
+        <span class="welcome-symbol" aria-hidden="true">✳</span>
+        <div><h2>つくる楽しさを、みんなで。</h2><p>見るだけでも、はじめての投稿でも。あなたの好奇心を歓迎します。</p></div>
+        <p class="home-status">
+          {% if current_user %}ユーザー: {{ current_user.name }} ({{ current_user.sub }}){% else %}<a href="/auth/login">ログインしてください {{ icon('arrow') }}</a>{% endif %}
+        </p>
+      </aside>
       {% endif %}
 
       {% if page in ["login", "signup", "logout", "changepass", "forgotpass"] %}
       <section class="auth-card">
+        <div class="auth-card-icon" aria-hidden="true">{{ icon('user') }}</div>
+        <p class="eyebrow">YOUR COMMUNITY, YOUR PLACE</p>
         {% if form_error %}
         <p class="form-error">{{ form_error }}</p>
         {% endif %}
@@ -769,6 +310,10 @@
       {% endif %}
 
       {% if not selected_thread %}
+      <header class="board-heading">
+        <span class="board-icon icon-{{ active_route.value|lower }}">{{ icon(active_route.value) }}</span>
+        <div><p class="eyebrow">{{ active_route.value }} / COMMUNITY</p><h1>{{ route_labels[active_route] }}</h1><p>{{ {'BBS': '質問も、発見も、気軽な雑談も。', 'WIKI': '使い方やテクニックを、みんなの知識に。', 'IMAGE': 'お気に入りのシーンを、画像で見せ合おう。', 'DATA': 'シーンを共有して、アイデアを動かそう。'}[active_route.value] }}</p></div>
+      </header>
       <details class="modal-toggle" {% if open_modal == "new-thread" %}open{% endif %}>
         <summary>スレッドを投稿する</summary>
         <div class="modal-body">
@@ -785,9 +330,9 @@
         </div>
       </details>
       <form class="search-form" method="get" action="/i/{{ active_route.value }}">
-        <input class="form-control" name="q" value="{{ search_query }}" placeholder="返信を検索する" />
+        <input class="form-control" name="q" value="{{ search_query }}" placeholder="返信を検索する" aria-label="返信を検索する" />
         <button class="btn btn-primary" type="submit">Submit</button>
-        <select class="form-control sort-select" name="sort" onchange="this.form.submit()">
+        <select class="form-control sort-select" name="sort" aria-label="並べ替え" onchange="this.form.submit()">
           {% for value, label in sort_options %}<option value="{{ value }}" {% if selected_sort == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
       </form>
@@ -945,9 +490,9 @@
       </details>
       {% if current_user %}
       <form class="search-form" method="get" action="/i/{{ active_route.value }}/{{ selected_thread.thread_id }}">
-        <input class="form-control" name="q" value="{{ search_query }}" placeholder="返信を検索する" />
+        <input class="form-control" name="q" value="{{ search_query }}" placeholder="返信を検索する" aria-label="返信を検索する" />
         <button class="btn btn-primary" type="submit">Submit</button>
-        <select class="form-control sort-select" name="sort" onchange="this.form.submit()">
+        <select class="form-control sort-select" name="sort" aria-label="並べ替え" onchange="this.form.submit()">
           {% for value, label in sort_options %}<option value="{{ value }}" {% if selected_sort == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
       </form>
@@ -961,6 +506,8 @@
       {% endif %}
       {% endif %}
     </main>
+
+    <footer class="site-footer"><a href="/">AlgodooOnline<span class="footer-dot">.</span></a><span>好奇心から、つながる場所。</span><span>MADE FOR THE JOY OF CREATING</span></footer>
 
     <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js" integrity="sha384-KtB38COewxfrhJxoN2d+olxJAeT08LF8cVZ6DQ8Poqu89zIptqO6zAXoIxpGNWYE" crossorigin="anonymous"></script>
     <script>

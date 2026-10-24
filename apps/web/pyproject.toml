@@ -31,4 +31,4 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-algodoo_web = ["templates/*.html"]
+algodoo_web = ["templates/*.html", "templates/*.css", "templates/*.svg"]

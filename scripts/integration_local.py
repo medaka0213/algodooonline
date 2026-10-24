@@ -168,6 +168,16 @@ def main() -> None:
     assert "AlgodooOnline [ver 2.0]" in home
     assert "サイトマップ" in home
     assert "ユーザー認証" in home
+    # The visual refresh must keep all four destinations and the local session flow.
+    for route in ("BBS", "WIKI", "IMAGE", "DATA"):
+        assert f'href="/i/{route}" aria-label=' in home
+        board = fetch(f"/i/{route}")
+        assert f'action="/i/{route}"' in board
+        assert f'href="/i/{route}" aria-current="page"' in board
+    assert 'href="#main-content"' in home
+    assert 'id="main-content"' in home
+    assert 'var(--paper)' in home  # Shared styles are embedded, including on Lambda.
+    assert "{% include" not in home
     assert "migration" not in home.lower()
     assert "single-table" not in home
 
