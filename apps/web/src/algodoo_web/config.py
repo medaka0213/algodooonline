@@ -91,6 +91,15 @@ class WebSettings:
     asset_s3_auto_create: bool = field(
         default_factory=lambda: _env_flag("ASSET_S3_AUTO_CREATE", "true")
     )
+    # Largest form submission (bytes of the urlencoded body) the browser may send;
+    # the thread forms enforce it before posting. The default tracks the Lambda +
+    # API Gateway ceiling: the 6 MiB invocation payload holds the request body
+    # base64-encoded (x4/3), so bodies above ~4.7 MB (4,718,592 bytes, measured
+    # on production) get a bare 413 from API Gateway before the app can answer.
+    # Self-hosted deployments without that ceiling may raise it; 0 disables it.
+    max_form_body_bytes: int = field(
+        default_factory=lambda: int(os.getenv("MAX_FORM_BODY_BYTES", "4500000"))
+    )
     media_root_override: str = field(
         default_factory=lambda: (os.getenv("MEDIA_ROOT") or "").strip()
     )

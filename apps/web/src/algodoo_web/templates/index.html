@@ -1022,6 +1022,40 @@
           }
         });
       });
+      // Behind API Gateway + Lambda a post larger than ~4.7 MB is rejected with
+      // a bare 413 before the app can say anything. Measure the exact urlencoded
+      // body the browser will send (several images, long text, base64 and
+      // percent-encoding growth all included) and stop the post with an
+      // explanation instead.
+      function updateSizeError(form) {
+        var limit = parseInt(form.dataset.maxBodyBytes || "0", 10);
+        var err = form.querySelector(".form-error[data-size-error]");
+        var size = limit ? new URLSearchParams(new FormData(form)).toString().length : 0;
+        if (!limit || size <= limit) {
+          if (err) err.remove();
+          return false;
+        }
+        // Attachments dominate the body; as data URLs they grow ~1.42x
+        // (base64 plus percent-encoding), so translate the overshoot to file bytes.
+        var cutMb = Math.ceil((size - limit) / 1.42 / 100000) / 10;
+        if (!err) {
+          err = document.createElement("p");
+          err.className = "form-error";
+          err.setAttribute("data-size-error", "");
+          form.insertBefore(err, form.firstChild);
+        }
+        err.textContent =
+          "送信データが大きすぎます (約 " + (size / 1000000).toFixed(1) + " MB / 上限 " + (limit / 1000000).toFixed(1) + " MB)。" +
+          "添付ファイルを約 " + cutMb.toFixed(1) + " MB 以上小さくするか、枚数を減らしてください。";
+        return true;
+      }
+      document.querySelectorAll("form[data-max-body-bytes]").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+          if (!updateSizeError(form)) return;
+          event.preventDefault();
+          form.querySelector(".form-error[data-size-error]").scrollIntoView({ block: "nearest" });
+        });
+      });
       document.querySelectorAll("[data-open-modal]").forEach(function (button) {
         button.addEventListener("click", function (event) {
           event.preventDefault();
@@ -1165,6 +1199,8 @@
             target.value = loaded.join("\n");
             if (list) list.textContent = names.length + "件: " + names.join(", ");
             renderFilePreview(preview, loaded);
+            var form = input.closest("form");
+            if (form) updateSizeError(form);
           }
           Array.prototype.forEach.call(input.files || [], function (file) {
             names.push(file.name);

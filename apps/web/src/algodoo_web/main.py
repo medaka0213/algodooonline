@@ -546,6 +546,7 @@ def _base_context(request: Request) -> dict[str, object]:
         "route_labels": ROUTE_LABELS,
         "sort_options": SORT_OPTIONS,
         "current_user": _current_user(request),
+        "max_form_body_bytes": get_settings().max_form_body_bytes,
         "current_path_with_query": (
             f"{request.url.path}?{query_string}" if query_string else request.url.path
         ),

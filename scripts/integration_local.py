@@ -360,6 +360,9 @@ def main() -> None:
     assert ".phz" in data_html
     assert_s3_object_url_rendered(data_html, "DATA/")
     assert_thread_list_layout("DATA", data_path, expect_preview=True)
+    # The thread forms carry the body-size ceiling that the page script enforces
+    # (behind API Gateway + Lambda larger posts get a bare 413; SPEC §13.3).
+    assert 'data-max-body-bytes="4500000"' in fetch("/i/DATA")
     # Old DownloadPHZ/SlideShow have no raw attachment listing (SPEC §7.1).
     assert 'class="attachment"' not in data_html
     assert 'class="attachment"' not in image_html

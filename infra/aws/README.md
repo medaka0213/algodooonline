@@ -17,6 +17,11 @@
 
 state は `guppy-terraform-state` の `algodooonline/terraform.tfstate`（`guppy-monorepo/deploy/terraform/cognito` と同じバケット・別キー）。
 
+## 制約
+
+- **1 回の送信は約 4.7MB まで**：Lambda の呼び出しペイロード上限（6MB）を、API Gateway が本文を base64 化した後に超えると、アプリに届く前に API Gateway が素の 413 を返します。本番で実測した境界は 4,718,592 バイト（4.5 MiB）です。画面のフォームは、これに余裕を持たせた 4,500,000 バイト（`MAX_FORM_BODY_BYTES`）を送信前に確認し、超えるときはメッセージを出して止めます。base64 と URL エンコードで本文はファイルの約 1.4 倍になるので、ファイルの合計では約 3MB が目安です。
+- それより大きなファイルを扱うには、ブラウザから S3 へ署名付き URL で直接アップロードする方式が必要です（現在は未対応）。
+
 ## デプロイ
 
 ```bash
