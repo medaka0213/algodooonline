@@ -66,8 +66,8 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d --bui
 
 - `app`: マルチステージ `Dockerfile` でビルドした non-root イメージ（uvicorn workers）
 - `dynamodb`: `amazon/dynamodb-local`（`-sharedDb` + 永続ボリューム）
-- `minio` + `minio-init`: S3 互換の添付ストア。バケット作成・匿名 download ポリシー・アプリ用ユーザーは `minio-init` が用意
-- TLS はホスト側のリバースプロキシに委譲（`deploy/Caddyfile.example`）。アプリは `127.0.0.1:8080`、MinIO は `127.0.0.1:9000` にのみバインド
+- `s3` + `s3-init`: S3 互換の添付ストア（SeaweedFS。MinIO はイメージ配布終了のため置換）。管理キー・アプリ用キー・`IMAGE/`・`DATA/` だけの匿名 read は `s3` が起動時に設定し、バケットは `s3-init` が作成
+- TLS はホスト側のリバースプロキシに委譲（`deploy/Caddyfile.example`）。アプリは `127.0.0.1:8080`、S3 ゲートウェイは `127.0.0.1:9000` にのみバインド
 - 認証は実 Cognito。User Pool / App Client（client secret なし、`ALLOW_USER_PASSWORD_AUTH` + `ALLOW_REFRESH_TOKEN_AUTH`）を用意して `.env.production` に設定
 - `AUTH_BACKEND=cognito` のとき、`LEGACY_X_API_KEY` がローカル既定値のままだと起動を拒否します
 
@@ -88,7 +88,7 @@ S3 資産はキー規約が同じなのでそのままミラーします。
 
 ```bash
 aws s3 sync s3://img.algodooonline.net ./assets-dump
-mc mirror ./assets-dump local/algodoo-assets
+aws --endpoint-url http://127.0.0.1:9000 s3 sync ./assets-dump s3://algodoo-assets
 ```
 
 ## ローカル結合テスト
@@ -111,7 +111,7 @@ Cognito バックエンドの結合テスト（moto の cognito-idp を利用）
 docker compose --profile test-cognito up --abort-on-container-exit --exit-code-from integration-cognito
 ```
 
-本番トポロジ（ビルド済みイメージ + DynamoDB Local + MinIO、local 認証）の検証:
+本番トポロジ（ビルド済みイメージ + DynamoDB Local + SeaweedFS S3、local 認証）の検証:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.ci up -d --build

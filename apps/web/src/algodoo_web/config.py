@@ -79,7 +79,7 @@ class WebSettings:
         default_factory=lambda: (os.getenv("ASSET_PUBLIC_BASE_URL") or "").strip().rstrip("/")
     )
     asset_s3_public_acl: bool = field(default_factory=lambda: _env_flag("ASSET_S3_PUBLIC_ACL"))
-    # Dedicated credentials for the asset object store (e.g. MinIO app user).
+    # Dedicated credentials for the asset object store (e.g. self-hosted S3 app key).
     # Empty → boto3 default credential chain (AWS_ACCESS_KEY_ID etc.).
     asset_s3_access_key_id: str = field(
         default_factory=lambda: (os.getenv("ASSET_S3_ACCESS_KEY_ID") or "").strip()
