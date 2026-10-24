@@ -455,6 +455,28 @@ def main() -> None:
     )["result"]
     assert api("DELETE", f"/bbslogs/{api_thread_id}/{api_log['log_id']}")["result"]
     assert api("DELETE", f"/threads/DATA/{api_thread_id}")["result"]
+
+    # Migrated Algon2 DATA threads keep only the thumbnail key; the download
+    # link is derived from it (DATA/{id}_{index}_thumb.png -> .phz, SPEC §13.2).
+    legacy_thumb = f"DATA/legacy{suffix}_0_thumb.png"
+    legacy_thread_id = api(
+        "POST",
+        "/threads/DATA",
+        {
+            "submition": {
+                "user_name": integration_user,
+                "user_id": integration_sub,
+                "title": f"Legacy data {suffix}",
+                "content": "thumbnail-only filedata",
+                "filedata": [legacy_thumb],
+            }
+        },
+    )["thread"]["thread_id"]
+    legacy_html = fetch(f"/i/DATA/{legacy_thread_id}")
+    assert "ダウンロード" in legacy_html
+    assert f'href="{ASSET_PUBLIC_BASE_URL}/DATA/legacy{suffix}_0.phz"' in legacy_html
+    assert f'src="{ASSET_PUBLIC_BASE_URL}/{legacy_thumb}"' in legacy_html
+    assert api("DELETE", f"/threads/DATA/{legacy_thread_id}")["result"]
     assert api(
         "POST",
         "/user/signin",

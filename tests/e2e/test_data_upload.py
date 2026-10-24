@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 
 from auth import login
@@ -33,6 +34,42 @@ def test_data_thread_shows_download_block_and_list_thumbnail(
     expect(item).to_have_class(has_class("has-preview"))
     expect(item.locator("img.thread-preview")).to_be_visible()
     expect(item.locator("a.thread-link")).to_have_attribute("href", thread_path)
+
+
+def test_migrated_thumbnail_only_data_thread_shows_download_link(
+    page: Page, username: str, unique_id: str
+) -> None:
+    """Migrated Algon2 DATA threads store only `*_thumb.png`; the `.phz`
+    download link is derived from it (SPEC §13.2)."""
+    login(page, username)
+    thumb_key = f"DATA/legacy{unique_id}_0_thumb.png"
+    # Legacy JSON API (SPEC §11): session cookie from login() + x-api-key.
+    response = page.request.post(
+        "/threads/DATA",
+        headers={"x-api-key": os.environ.get("LEGACY_X_API_KEY", "local-x-api-key")},
+        data={
+            "submition": {
+                "user_name": username,
+                # The local pseudo-session's subject (must match the cookie).
+                "user_id": f"local-{username}",
+                "title": f"Legacy data {unique_id}",
+                "content": "thumbnail-only filedata",
+                "filedata": [thumb_key],
+            }
+        },
+    )
+    assert response.ok, response.text()
+    thread_id = response.json()["thread"]["thread_id"]
+
+    page.goto(f"/i/DATA/{thread_id}")
+    download_block = page.locator("article.post-detail .download-phz-wrap")
+    thumb = download_block.locator("img.download-phz-hero-thumb")
+    expect(thumb).to_have_attribute("src", re.compile(re.escape(thumb_key) + "$"))
+    link = download_block.get_by_role("link", name="ダウンロード")
+    expect(link).to_be_visible()
+    expect(link).to_have_attribute(
+        "href", re.compile(re.escape(f"DATA/legacy{unique_id}_0.phz") + "$")
+    )
 
 
 def test_data_form_shows_phz_thumbnail_preview(page: Page, username: str, tmp_path) -> None:

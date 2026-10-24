@@ -595,6 +595,7 @@ Like集計は `n_good`, `n_bad`, `n_total` を返す。post本体側には `nLik
 - PHZの場合はzip内 `thumb.png` を抽出し、`DATA/{thread_id}_{index}_thumb.png` として保存する。
 - 一覧と詳細では `*_thumb.png` をプレビューに使う。
 - 詳細では元ファイルへの `ダウンロード` リンクを表示する。
+- 旧本番データの DATA スレッドは `filedata` に `DATA/{thread_id}_{index}_thumb.png` だけを持ち、`.phz` のキーを持たない（2026-10 の試し移行で 64 件すべてを確認。PHZ 本体は同じ名前の `.phz` として S3 にある）。`.phz` キーが無く `*_thumb.png` だけがある場合は、`DATA/{thread_id}_{index}.phz` を導出してダウンロードリンクにする。
 
 ### 13.3 サーバー側検証
 

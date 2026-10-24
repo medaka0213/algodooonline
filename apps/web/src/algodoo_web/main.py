@@ -335,6 +335,10 @@ def _data_download_context(filedata: list[str] | None) -> dict[str, str]:
         cand = f"{primary[:-4]}_thumb.png"
         if cand in files:
             thumb = cand
+    if not primary and thumb.startswith("DATA/") and thumb.endswith("_thumb.png"):
+        # Legacy Algon2 DATA threads stored only the thumbnail key; the archive
+        # sits next to it as DATA/{thread_id}_{index}.phz (SPEC §13.2).
+        primary = f"{thumb[: -len('_thumb.png')]}.phz"
     return {
         "data_primary_phz": primary,
         "data_primary_phz_url": media_public_url(primary) if primary else "",
