@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
+import shutil
+import tempfile
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 
 import boto3
 from algodoo_data.uploads import (
+    MAX_UPLOAD_BYTES,
+    UploadRef,
     parse_data_url,
+    parse_upload_ref,
     validate_jpeg_bytes,
     validate_phn_bytes,
     validate_phz_bytes,
     validate_storage_key,
 )
 from algodoo_domain.models import LegacyRoute
+from botocore.exceptions import ClientError
 
 from algodoo_web.config import get_settings
 
@@ -98,15 +106,127 @@ def _persist_file_bytes(storage_key: str, body: bytes, content_type: str) -> str
     return None
 
 
+# --- Chunked uploads ---------------------------------------------------------
+# A file too big for one form post is PUT in several chunks first (browser ->
+# /uploads/{id}/{index}); the thread form then carries only an
+# `upload:{id}:{chunks}:{size}:{mime}` reference. Chunks live in the asset
+# bucket under a private prefix (no ACL, so never publicly readable; the S3
+# lifecycle rule in infra/aws expires them) because Lambda invocations do not
+# share a filesystem. Without a bucket (local dev) they go to a temp dir that is
+# NOT under media_root(), which /media serves publicly.
+UPLOAD_TMP_PREFIX = "UPLOAD-TMP"
+
+
+@lru_cache
+def _s3_client():
+    return boto3.client("s3", **asset_s3_client_kwargs())
+
+
+def _chunk_path(owner: str, upload_id: str, index: int) -> str:
+    # Hash the owner so any session subject maps to a safe, fixed-length path part.
+    namespace = hashlib.sha256(owner.encode()).hexdigest()[:32]
+    return f"{namespace}/{upload_id}/{index:04d}"
+
+
+def _local_upload_root() -> Path:
+    return Path(tempfile.gettempdir()) / "algodoo-upload-tmp"
+
+
+def put_upload_chunk(owner: str, upload_id: str, index: int, body: bytes) -> str | None:
+    """Store one chunk; return an error message or None on success."""
+    path = _chunk_path(owner, upload_id, index)
+    settings = get_settings()
+    if not settings.asset_s3_bucket:
+        target = _local_upload_root() / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+        return None
+    try:
+        _s3_client().put_object(
+            Bucket=settings.asset_s3_bucket,
+            Key=_s3_object_key(f"{UPLOAD_TMP_PREFIX}/{path}"),
+            Body=body,
+            ContentType="application/octet-stream",
+        )
+    except Exception as exc:  # noqa: BLE001 — surface to caller
+        return str(exc)
+    return None
+
+
+def _read_upload_chunk(owner: str, upload_id: str, index: int) -> bytes | None:
+    path = _chunk_path(owner, upload_id, index)
+    settings = get_settings()
+    if not settings.asset_s3_bucket:
+        try:
+            return (_local_upload_root() / path).read_bytes()
+        except FileNotFoundError:
+            return None
+    try:
+        response = _s3_client().get_object(
+            Bucket=settings.asset_s3_bucket,
+            Key=_s3_object_key(f"{UPLOAD_TMP_PREFIX}/{path}"),
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}:
+            return None
+        raise
+    return response["Body"].read()
+
+
+def load_upload(owner: str, ref: UploadRef) -> tuple[str, bytes] | str:
+    """Reassemble a chunked upload into (mime, bytes), or return an error message."""
+    parts: list[bytes] = []
+    total = 0
+    for index in range(ref.chunks):
+        try:
+            chunk = _read_upload_chunk(owner, ref.upload_id, index)
+        except ClientError as exc:
+            return f"could not read upload chunk {index + 1}/{ref.chunks}: {exc}"
+        if chunk is None:
+            return f"upload is incomplete: chunk {index + 1}/{ref.chunks} is missing"
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            return f"upload payload too large: exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"
+        parts.append(chunk)
+    raw = b"".join(parts)
+    if len(raw) != ref.size:
+        return f"upload size mismatch: expected {ref.size} bytes, received {len(raw)}"
+    return ref.mime, raw
+
+
+def delete_upload(owner: str, ref: UploadRef) -> None:
+    """Best-effort cleanup; the lifecycle rule expires whatever this misses."""
+    settings = get_settings()
+    paths = [_chunk_path(owner, ref.upload_id, index) for index in range(ref.chunks)]
+    if not settings.asset_s3_bucket:
+        shutil.rmtree(_local_upload_root() / paths[0].rsplit("/", 1)[0], ignore_errors=True)
+        return
+    try:
+        _s3_client().delete_objects(
+            Bucket=settings.asset_s3_bucket,
+            Delete={
+                "Objects": [
+                    {"Key": _s3_object_key(f"{UPLOAD_TMP_PREFIX}/{path}")} for path in paths
+                ],
+                "Quiet": True,
+            },
+        )
+    except Exception:  # noqa: BLE001 — cleanup must never fail a successful post
+        pass
+
+
 def normalize_and_persist_filedata(
     *,
     route: LegacyRoute,
     thread_id: str,
     filedata: list[str],
+    owner: str | None = None,
 ) -> tuple[list[str], str | None]:
     """
-    Replace Data URLs with on-disk keys under IMAGE/ or DATA/.
+    Replace Data URLs and chunked-upload references with keys under IMAGE/ or DATA/.
     Existing IMAGE/… or DATA/… lines are kept (for integration fixtures and API keys).
+    `owner` (the session subject) scopes chunked uploads: only the user who uploaded
+    the chunks can reference them.
     """
     if route not in (LegacyRoute.IMAGE, LegacyRoute.DATA):
         if any(line.strip() for line in filedata):
@@ -120,21 +240,34 @@ def normalize_and_persist_filedata(
         (root / "IMAGE").mkdir(parents=True, exist_ok=True)
         (root / "DATA").mkdir(parents=True, exist_ok=True)
 
+    used_uploads: list[UploadRef] = []
     for item in filedata:
         if not item:
             continue
-        if not item.startswith("data:"):
+        if item.startswith("upload:"):
+            if not owner:
+                return [], "chunked uploads require a signed-in user"
+            ref = parse_upload_ref(item)
+            if ref is None:
+                return [], "invalid upload reference"
+            loaded = load_upload(owner, ref)
+            if isinstance(loaded, str):
+                return [], loaded
+            mime, raw = loaded
+            used_uploads.append(ref)
+        elif not item.startswith("data:"):
             if err := validate_storage_key(route, item):
                 return [], err
             out.append(item)
             continue
-        try:
-            parsed = parse_data_url(item)
-        except ValueError as exc:  # oversize payload (MAX_UPLOAD_BYTES in uploads.py)
-            return [], str(exc)
-        if not parsed:
-            return [], "invalid Data URL"
-        mime, raw = parsed
+        else:
+            try:
+                parsed = parse_data_url(item)
+            except ValueError as exc:  # oversize payload (MAX_UPLOAD_BYTES in uploads.py)
+                return [], str(exc)
+            if not parsed:
+                return [], "invalid Data URL"
+            mime, raw = parsed
         if route == LegacyRoute.IMAGE:
             if mime != "image/jpeg":
                 return [], "IMAGE route requires JPEG Data URLs"
@@ -192,4 +325,7 @@ def normalize_and_persist_filedata(
         else:
             return [], "filedata is only supported for IMAGE and DATA routes"
 
+    if owner:
+        for ref in used_uploads:
+            delete_upload(owner, ref)
     return out, None

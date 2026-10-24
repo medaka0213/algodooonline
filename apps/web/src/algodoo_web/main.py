@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from contextlib import asynccontextmanager
@@ -27,7 +28,14 @@ from algodoo_data.repository import (
     update_thread_details,
     upsert_user_from_claims,
 )
-from algodoo_data.uploads import validate_thread_filedata
+from algodoo_data.uploads import (
+    CLIENT_UPLOAD_CHUNK_BYTES,
+    MAX_UPLOAD_BYTES,
+    MAX_UPLOAD_CHUNK_BYTES,
+    MAX_UPLOAD_CHUNKS,
+    is_valid_upload_id,
+    validate_thread_filedata,
+)
 from algodoo_domain.models import LegacyRoute, LikeType
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -36,7 +44,12 @@ from markupsafe import Markup
 from starlette.staticfiles import StaticFiles
 
 from algodoo_web.api import router as api_router
-from algodoo_web.asset_store import media_public_url, media_root, normalize_and_persist_filedata
+from algodoo_web.asset_store import (
+    media_public_url,
+    media_root,
+    normalize_and_persist_filedata,
+)
+from algodoo_web.asset_store import put_upload_chunk as store_upload_chunk
 from algodoo_web.auth import AuthError, get_auth_backend
 from algodoo_web.auth.cookies import (
     apply_session_cookies,
@@ -46,6 +59,8 @@ from algodoo_web.auth.cookies import (
 from algodoo_web.bootstrap import bootstrap_data
 from algodoo_web.config import get_settings, validate_production_settings
 from algodoo_web.session_refresh import SessionRefreshMiddleware
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -547,6 +562,8 @@ def _base_context(request: Request) -> dict[str, object]:
         "sort_options": SORT_OPTIONS,
         "current_user": _current_user(request),
         "max_form_body_bytes": get_settings().max_form_body_bytes,
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "upload_chunk_bytes": CLIENT_UPLOAD_CHUNK_BYTES,
         "current_path_with_query": (
             f"{request.url.path}?{query_string}" if query_string else request.url.path
         ),
@@ -916,6 +933,32 @@ def _thread_form_error_response(
     )
 
 
+@app.put("/uploads/{upload_id}/{index}")
+async def put_upload_chunk(request: Request, upload_id: str, index: int) -> JSONResponse:
+    """Receive one chunk of a file too big for a single form post (SPEC §13.4).
+
+    The browser splits the file, PUTs each chunk here, then references the upload
+    from the thread form as `upload:{id}:{chunks}:{size}:{mime}`. Chunks are
+    scoped to the signed-in user, so nobody can reference another user's upload.
+    """
+    user = _current_user(request)
+    if user is None:
+        return JSONResponse({"detail": "authentication required"}, status_code=401)
+    if not is_valid_upload_id(upload_id) or not 0 <= index < MAX_UPLOAD_CHUNKS:
+        raise HTTPException(status_code=404, detail="unknown upload")
+    body = await request.body()
+    if not body:
+        return JSONResponse({"detail": "empty chunk"}, status_code=422)
+    if len(body) > MAX_UPLOAD_CHUNK_BYTES:
+        return JSONResponse(
+            {"detail": f"chunk too large (max {MAX_UPLOAD_CHUNK_BYTES} bytes)"}, status_code=413
+        )
+    if err := store_upload_chunk(user["sub"], upload_id, index, body):
+        logger.error("could not store upload chunk %s/%s: %s", upload_id, index, err)
+        return JSONResponse({"detail": "could not store the chunk"}, status_code=502)
+    return JSONResponse({"result": True, "index": index, "size": len(body)})
+
+
 @app.post("/i/{route}/threads", response_model=None)
 async def create_thread_form(request: Request, route: str) -> RedirectResponse | HTMLResponse:
     user = _require_user(request)
@@ -942,6 +985,7 @@ async def create_thread_form(request: Request, route: str) -> RedirectResponse |
         route=legacy_route,
         thread_id=thread.thread_id,
         filedata=raw_files,
+        owner=user["sub"],
     )
     if nerr:
         delete_thread(legacy_route, thread.thread_id)
@@ -982,6 +1026,7 @@ async def edit_thread_form(
         route=legacy_route,
         thread_id=thread_id,
         filedata=raw_files,
+        owner=user["sub"],
     )
     if nerr:
         return _thread_form_error_response(

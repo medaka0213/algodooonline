@@ -4,7 +4,7 @@
 {% set preset_title = form_title|default(none) %}
 {% set preset_content = form_content|default(none) %}
 {% set preset_filedata = form_filedata|default(none) %}
-<form method="post" action="{{ target_action }}" data-max-body-bytes="{{ max_form_body_bytes|default(0) }}">
+<form method="post" action="{{ target_action }}" data-max-body-bytes="{{ max_form_body_bytes|default(0) }}" data-max-upload-bytes="{{ max_upload_bytes|default(0) }}" data-upload-chunk-bytes="{{ upload_chunk_bytes|default(0) }}">
   <div class="form-group">
     <label>title
       <input class="form-control" name="title" value="{{ preset_title if preset_title is not none else (target_thread.title if target_thread else '') }}" required maxlength="32" />

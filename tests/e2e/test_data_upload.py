@@ -14,7 +14,7 @@ from board import (
     strip_origin,
     submit_and_wait,
 )
-from files import make_phn, make_phz
+from files import make_big_phz, make_phn, make_phz
 from playwright.sync_api import Page, expect
 
 
@@ -79,44 +79,100 @@ def test_migrated_thumbnail_only_data_thread_shows_download_link(
     )
 
 
-def test_oversized_attachment_is_stopped_before_posting(
+def test_large_phz_is_uploaded_in_chunks(
     page: Page, username: str, unique_id: str, tmp_path
 ) -> None:
-    """Behind API Gateway + Lambda a body above ~4.7 MB gets a bare 413 from the
-    gateway, so the form measures the post and explains the limit instead of
-    sending it (SPEC §13.3). A smaller file afterwards posts normally."""
+    """A file too big for one form post (API Gateway + Lambda carries ~4.7 MB per
+    request) is split and PUT in pieces; the form then posts only a reference
+    (SPEC §13.4). The thread ends up with the full archive and its thumbnail."""
     login(page, username)
-    title = f"Too big {unique_id}"
-    big = tmp_path / "big.phn"
-    big.write_bytes(b"a" * (5 * 1024 * 1024))  # base64 data URL alone is ~7 MB
+    chunk_puts: list[str] = []
+    page.on(
+        "request",
+        lambda r: chunk_puts.append(r.url) if r.method == "PUT" and "/uploads/" in r.url else None,
+    )
+    title = f"Chunked {unique_id}"
+    big = make_big_phz(tmp_path, 5 * 1024 * 1024)
     page.goto("/i/DATA")
     toggle = page.locator("details.modal-toggle")
     toggle.locator("summary").click()
     form = toggle.locator("form")
     form.get_by_label("title").fill(title)
-    fill_content(page, form, "DATA", "oversized attachment")
-    file_input = form.locator('input[type="file"]')
-    file_input.set_input_files(str(big))
+    fill_content(page, form, "DATA", "chunked upload")
+    form.locator('input[type="file"]').set_input_files(str(big))
 
-    # Feedback appears as soon as the file is chosen, before any submit.
-    error = form.locator(".form-error[data-size-error]")
-    expect(error).to_contain_text("送信データが大きすぎます")
-    expect(error).to_contain_text("MB 以上小さくするか")
+    # Progress is shown while it uploads; afterwards the form carries a reference.
+    expect(form.locator("#file-list-new")).to_contain_text("アップロード済み")
+    expect(form.locator('textarea[name="filedata"]')).to_have_value(
+        re.compile(r"^upload:[0-9a-f]{32}:3:\d+:application/zip$")
+    )
+    assert len(chunk_puts) == 3  # 5 MiB + a little, in 2 MiB pieces
+    # The preview still comes from the file chosen in the browser.
+    expect(form.locator(".file-preview img")).to_have_count(1)
+    submit_button = form.get_by_role("button", name="submit", exact=True)
+    expect(submit_button).to_be_enabled()
 
-    # Submit is blocked: the oversized post is never sent.
+    submit_and_wait(page, submit_button)
+    assert strip_origin(page.url).startswith("/i/DATA/DATA_")
+    download_block = page.locator("article.post-detail .download-phz-wrap")
+    expect(download_block.locator("img.download-phz-hero-thumb")).to_be_visible()
+    link = download_block.get_by_role("link", name="ダウンロード")
+    href = link.get_attribute("href")
+    assert href is not None and href.endswith(".phz")
+
+
+def test_file_over_the_per_file_limit_is_refused_before_uploading(
+    page: Page, username: str, unique_id: str, tmp_path
+) -> None:
+    """Even chunked, a file may not exceed the per-file limit (10 MB): the form
+    says so right away and sends nothing."""
+    login(page, username)
+    requests: list[str] = []
+    page.on(
+        "request",
+        lambda r: requests.append(r.url) if r.method in {"PUT", "POST"} else None,
+    )
+    too_big = tmp_path / "too-big.phn"
+    too_big.write_bytes(b"a" * (11 * 1024 * 1024))
+    page.goto("/i/DATA")
+    toggle = page.locator("details.modal-toggle")
+    toggle.locator("summary").click()
+    form = toggle.locator("form")
+    form.locator('input[type="file"]').set_input_files(str(too_big))
+
+    error = form.locator(".form-error[data-upload-error]")
+    expect(error).to_contain_text("too-big.phn は大きすぎます")
+    expect(error).to_contain_text("上限 10.0 MB")
+    expect(form.locator('textarea[name="filedata"]')).to_have_value("")
+    assert requests == []
+
+    # Choosing an acceptable file afterwards clears the message.
+    form.locator('input[type="file"]').set_input_files(str(make_phn(tmp_path)))
+    expect(form.locator(".form-error[data-upload-error]")).to_have_count(0)
+    expect(form.locator('textarea[name="filedata"]')).to_have_value(re.compile(r"^data:text/plain"))
+
+
+def test_form_body_guard_blocks_a_post_that_would_get_a_gateway_413(
+    page: Page, username: str, unique_id: str
+) -> None:
+    """Backstop: whatever ends up in the form, a post above the body ceiling is
+    stopped with an explanation instead of reaching API Gateway's bare 413."""
+    login(page, username)
+    page.goto("/i/DATA")
+    toggle = page.locator("details.modal-toggle")
+    toggle.locator("summary").click()
+    form = toggle.locator("form")
+    form.get_by_label("title").fill(f"Guard {unique_id}")
+    fill_content(page, form, "DATA", "body guard")
+    form.locator('textarea[name="filedata"]').evaluate("el => { el.value = 'x'.repeat(5000000); }")
     posts: list[str] = []
     page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
     form.get_by_role("button", name="submit", exact=True).click()
-    page.wait_for_timeout(500)
-    expect(error).to_be_visible()
-    assert strip_origin(page.url) == "/i/DATA"
+    error = form.locator(".form-error[data-size-error]")
+    expect(error).to_contain_text("送信データが大きすぎます")
+    page.wait_for_timeout(300)
     assert posts == []
-
-    # Swapping in a small file clears the message and the post goes through.
-    file_input.set_input_files(str(make_phn(tmp_path)))
-    expect(error).to_have_count(0)
-    submit_and_wait(page, form.get_by_role("button", name="submit", exact=True))
-    assert strip_origin(page.url).startswith("/i/DATA/DATA_")
+    assert strip_origin(page.url) == "/i/DATA"
 
 
 def test_data_form_shows_phz_thumbnail_preview(page: Page, username: str, tmp_path) -> None:

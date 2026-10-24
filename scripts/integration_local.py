@@ -1,8 +1,10 @@
 import base64
+import hashlib
 import io
 import json
 import os
 import time
+import uuid
 import zipfile
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
@@ -82,6 +84,52 @@ def phz_data_url() -> str:
         zf.writestr("thumb.png", MIN_PNG)
     encoded = base64.b64encode(buf.getvalue()).decode()
     return f"data:application/zip;base64,{encoded}"
+
+
+def big_phz_bytes(filler_bytes: int) -> bytes:
+    """A valid PHZ whose scene.phn is stored (not deflated) so the archive really is big."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        scene = zipfile.ZipInfo("scene.phn")
+        scene.compress_type = zipfile.ZIP_STORED
+        zf.writestr(scene, base64.b64encode(os.urandom(filler_bytes * 3 // 4)).decode())
+        zf.writestr("checksums.txt", "sha256 placeholder\n")
+        zf.writestr("thumb.png", MIN_PNG)
+    return buf.getvalue()
+
+
+def put_chunk(upload_id: str, index: int, body: bytes, *, opener=OPENER) -> dict:
+    request = Request(
+        f"{BASE_URL}/uploads/{upload_id}/{index}",
+        data=body,
+        method="PUT",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    with opener.open(request, timeout=30) as response:
+        return json.loads(response.read().decode())
+
+
+def status_of(call) -> int:
+    """HTTP status of a call that is expected to fail with an HTTPError."""
+    try:
+        call()
+    except HTTPError as exc:
+        return exc.code
+    raise AssertionError("expected an HTTP error")
+
+
+def post_as(opener, path: str, payload: dict[str, str]) -> tuple[int, str]:
+    request = Request(
+        BASE_URL + path,
+        data=urlencode(payload).encode(),
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with opener.open(request, timeout=30) as response:
+            return response.status, response.read().decode()
+    except HTTPError as exc:
+        return exc.code, exc.read().decode()
 
 
 def get_json(path: str, opener=OPENER) -> dict:
@@ -374,8 +422,83 @@ def main() -> None:
     assert_s3_object_url_rendered(data_html, "DATA/")
     assert_thread_list_layout("DATA", data_path, expect_preview=True)
     # The thread forms carry the body-size ceiling that the page script enforces
-    # (behind API Gateway + Lambda larger posts get a bare 413; SPEC §13.3).
+    # (behind API Gateway + Lambda larger posts get a bare 413; SPEC §13.4).
     assert 'data-max-body-bytes="4500000"' in fetch("/i/DATA")
+
+    # Chunked upload (SPEC §13.4): a PHZ too big for one form post goes up in 2 MiB
+    # pieces and the form references it as `upload:{id}:{chunks}:{size}:{mime}`.
+    big = big_phz_bytes(5 * 1024 * 1024)
+    chunk_size = 2 * 1024 * 1024
+    pieces = [big[i : i + chunk_size] for i in range(0, len(big), chunk_size)]
+    assert len(pieces) == 3
+    upload_id = uuid.uuid4().hex
+    for index, piece in enumerate(pieces):
+        assert put_chunk(upload_id, index, piece) == {
+            "result": True,
+            "index": index,
+            "size": len(piece),
+        }
+    big_ref = f"upload:{upload_id}:{len(pieces)}:{len(big)}:application/zip"
+    chunked_path = post(
+        "/i/DATA/threads",
+        {"title": f"Chunked {suffix}", "content": "chunked upload", "filedata": big_ref},
+    )
+    chunked_html = fetch(chunked_path)
+    assert "ダウンロード" in chunked_html
+    assert_s3_object_url_rendered(chunked_html, "DATA/")
+    if S3_INTERNAL_BASE_URL:
+        marker = f"{ASSET_PUBLIC_BASE_URL}/"
+        href = chunked_html[chunked_html.index('class="download-phz-link" href="') :]
+        phz_url = href.split('href="', 1)[1].split('"', 1)[0]
+        with OPENER.open(
+            f"{S3_INTERNAL_BASE_URL}/{phz_url.removeprefix(marker)}", timeout=30
+        ) as response:
+            stored = response.read()
+        # The stored object is byte-for-byte the file that was split.
+        assert hashlib.sha256(stored).digest() == hashlib.sha256(big).digest()
+
+    # Guard rails around the chunk endpoint.
+    assert status_of(lambda: put_chunk(uuid.uuid4().hex, 0, b"x", opener=GUEST_API_OPENER)) == 401
+    assert status_of(lambda: put_chunk("not-an-id", 0, b"x")) == 404
+    assert status_of(lambda: put_chunk(uuid.uuid4().hex, 99, b"x")) == 404
+    assert status_of(lambda: put_chunk(uuid.uuid4().hex, 0, b"")) == 422
+    assert status_of(lambda: put_chunk(uuid.uuid4().hex, 0, b"x" * (3 * 1024 * 1024 + 1))) == 413
+
+    # An upload belongs to the user who sent it; a failed attempt does not consume it.
+    other = build_opener(HTTPCookieProcessor(CookieJar()))
+    other_login = {"Username": f"other-{suffix}", "password": "password123"}
+    assert post_as(other, "/auth/login", other_login)[0] == 200
+    owned_id = uuid.uuid4().hex
+    for index, piece in enumerate(pieces):
+        put_chunk(owned_id, index, piece)
+    owned_ref = f"upload:{owned_id}:{len(pieces)}:{len(big)}:application/zip"
+    stolen_status, stolen_html = post_as(
+        other,
+        "/i/DATA/threads",
+        {"title": f"Stolen {suffix}", "content": "not mine", "filedata": owned_ref},
+    )
+    assert stolen_status == 422 and "upload is incomplete" in stolen_html
+    owned_path = post(
+        "/i/DATA/threads",
+        {"title": f"Owned {suffix}", "content": "mine", "filedata": owned_ref},
+    )
+    assert owned_path.startswith("/i/DATA/DATA_")
+
+    # Broken references come back as a form error, not a server error.
+    short_id = uuid.uuid4().hex
+    put_chunk(short_id, 0, pieces[0])
+    for ref, expected in [
+        (f"upload:{uuid.uuid4().hex}:2:{len(big)}:application/zip", "upload is incomplete"),
+        (f"upload:{short_id}:1:{len(pieces[0]) + 1}:application/zip", "upload size mismatch"),
+        (f"upload:{upload_id}:1:{20 * 1024 * 1024}:application/zip", "invalid upload reference"),
+        (f"upload:{upload_id}:1:10:image/png", "not supported"),
+    ]:
+        status, html = post_as(
+            OPENER,
+            "/i/DATA/threads",
+            {"title": f"Bad ref {suffix}", "content": "x", "filedata": ref},
+        )
+        assert status == 422 and expected in html, (ref, status)
     # Old DownloadPHZ/SlideShow have no raw attachment listing (SPEC §7.1).
     assert 'class="attachment"' not in data_html
     assert 'class="attachment"' not in image_html

@@ -7,6 +7,7 @@ import binascii
 import io
 import re
 import zipfile
+from dataclasses import dataclass
 
 from algodoo_domain.models import LegacyRoute
 
@@ -18,10 +19,64 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 # Base64 expands data 4:3; check the encoded length BEFORE decoding.
 _MAX_BASE64_LEN = (MAX_UPLOAD_BYTES * 4) // 3 + 4
 
+# Chunked uploads: a file larger than a form post can carry (see
+# MAX_FORM_BODY_BYTES in algodoo_web.config) is sent as several PUTs of at most
+# MAX_UPLOAD_CHUNK_BYTES, then referenced from filedata as
+# `upload:{id}:{chunks}:{size}:{mime}` instead of an inline Data URL.
+# 3 MiB per request stays well below the API Gateway + Lambda body ceiling
+# (about 4.7 MB; the gateway base64-encodes the body, x4/3).
+MAX_UPLOAD_CHUNK_BYTES = 3 * 1024 * 1024
+# What the browser actually sends; leaves headroom under the server cap above.
+CLIENT_UPLOAD_CHUNK_BYTES = 2 * 1024 * 1024
+MAX_UPLOAD_CHUNKS = 16
+
 _JPEG_PREFIX = "data:image/jpeg;base64,"
+_UPLOAD_ID = re.compile(r"[0-9a-f]{32}")
+_UPLOAD_REF = re.compile(r"upload:([0-9a-f]{32}):(\d{1,2}):(\d{1,9}):([a-z]+/[a-z0-9.+-]+)")
+_UPLOAD_MIMES = {
+    LegacyRoute.IMAGE: frozenset({"image/jpeg"}),
+    LegacyRoute.DATA: frozenset({"application/zip", "text/plain"}),
+}
 
 _IMAGE_KEY = re.compile(r"^IMAGE/[A-Za-z0-9_.-]+\.(?:jpe?g|png|gif|webp)$")
 _DATA_KEY = re.compile(r"^DATA/[A-Za-z0-9_.-]+(?:\.(?:phz|phn)|_thumb\.png)$")
+
+
+@dataclass(frozen=True)
+class UploadRef:
+    """A filedata line pointing at a file that was uploaded in chunks."""
+
+    upload_id: str
+    chunks: int
+    size: int
+    mime: str
+
+
+def is_valid_upload_id(value: str) -> bool:
+    return bool(_UPLOAD_ID.fullmatch(value))
+
+
+def parse_upload_ref(value: str) -> UploadRef | None:
+    """Parse `upload:{id}:{chunks}:{size}:{mime}`; None if malformed or out of range."""
+    match = _UPLOAD_REF.fullmatch(value)
+    if not match:
+        return None
+    upload_id, chunks, size, mime = match.groups()
+    ref = UploadRef(upload_id, int(chunks), int(size), mime)
+    if not 1 <= ref.chunks <= MAX_UPLOAD_CHUNKS or not 1 <= ref.size <= MAX_UPLOAD_BYTES:
+        return None
+    return ref
+
+
+def validate_upload_ref(route: LegacyRoute, value: str) -> str | None:
+    """Return an error message for a malformed or wrong-type upload reference."""
+    ref = parse_upload_ref(value)
+    if ref is None:
+        limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        return f"invalid upload reference (files are limited to {limit_mb} MB)"
+    if ref.mime not in _UPLOAD_MIMES.get(route, frozenset()):
+        return f"upload type {ref.mime} is not supported for route {route.value}"
+    return None
 
 
 def validate_storage_key(route: LegacyRoute, key: str) -> str | None:
@@ -68,6 +123,10 @@ def validate_thread_filedata(route: LegacyRoute, filedata: list[str]) -> str | N
     """Return first validation error message, or None if OK (keys-only paths)."""
     if route == LegacyRoute.IMAGE:
         for item in filedata:
+            if item.startswith("upload:"):
+                if err := validate_upload_ref(route, item):
+                    return err
+                continue
             if not item or not item.startswith("data:"):
                 continue
             if not item.lower().startswith(_JPEG_PREFIX.lower()):
@@ -85,6 +144,10 @@ def validate_thread_filedata(route: LegacyRoute, filedata: list[str]) -> str | N
     if route == LegacyRoute.DATA:
         for item in filedata:
             if not item:
+                continue
+            if item.startswith("upload:"):
+                if err := validate_upload_ref(route, item):
+                    return err
                 continue
             if item.startswith("data:"):
                 try:
