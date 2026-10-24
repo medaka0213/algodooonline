@@ -209,13 +209,20 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ap-northeast-1
 
+      # The zip is not reproducible: .pyc files embed build-time data and the
+      # dist-info RECORD / uv_cache.json differ between builds, so two builds of
+      # the same commit have different hashes. Every push to main therefore
+      # deploys, docs-only merges included (a swap is atomic and takes seconds).
+      # The comparison below only short-circuits a re-run of the same workflow
+      # run, which reuses the same artifact. After the update, the same hash is
+      # checked again to prove AWS received exactly the zip that was tested.
       - name: Update the function code
         run: |
           local_sha=$(openssl dgst -sha256 -binary lambda.zip | base64)
           current_sha=$(aws lambda get-function --function-name "$FUNCTION_NAME" \
             --query Configuration.CodeSha256 --output text)
           if [ "$local_sha" = "$current_sha" ]; then
-            echo "Deployed code already matches this commit ($current_sha); nothing to do."
+            echo "Lambda already runs this exact zip ($current_sha), e.g. a re-run of the same build; nothing to do."
             exit 0
           fi
           aws lambda update-function-code --function-name "$FUNCTION_NAME" \
