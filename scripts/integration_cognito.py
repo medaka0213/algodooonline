@@ -57,6 +57,19 @@ def set_cookie_value(name: str, value: str) -> None:
     raise AssertionError(f"cookie {name} not present")
 
 
+def tamper_signature(token: str) -> str:
+    """Return the JWT with its signature guaranteed to differ.
+
+    The first character of a base64url signature carries six full data bits, so
+    swapping it for another character always changes the decoded signature.
+    (Rewriting the *last* characters is not safe: they hold padding bits, and a
+    replacement can decode to the same final byte about 1 time in 256.)
+    """
+    head, _, signature = token.rpartition(".")
+    swapped = "B" if signature[0] == "A" else "A"
+    return f"{head}.{swapped}{signature[1:]}"
+
+
 def get_json(path: str) -> dict:
     request = Request(BASE_URL + path, method="GET", headers={"Accept": "application/json"})
     with OPENER.open(request, timeout=10) as response:
@@ -128,7 +141,7 @@ def main() -> None:
     assert refreshed_token != id_token, "id token should rotate via REFRESH_TOKEN_AUTH"
 
     # Tampered token must not authenticate.
-    set_cookie_value("algodoo_idtoken", refreshed_token[:-2] + "xx")
+    set_cookie_value("algodoo_idtoken", tamper_signature(refreshed_token))
     assert "ログインしてください" in fetch("/")
     set_cookie_value("algodoo_idtoken", refreshed_token)
 
