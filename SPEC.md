@@ -49,6 +49,7 @@
 - DB: DynamoDB on-demand の single-table（`algodoo-main`。スキーマは IaC 管理で `DDB_AUTO_CREATE=false`）。アプリコードは `boto3 + ddb_single` のまま
 - ファイル: 既存の S3 bucket `img.algodooonline.net`（公開read ACL、既存 CloudFront 配信）をそのまま使う。キー規約が同じため移行不要
 - IaC: `infra/aws`（Terraform）
+- デプロイ: `main` へのマージで GitHub Actions（`deploy` ジョブ）が、テスト済みの zip で Lambda のコードだけを差し替える。認証は GitHub OIDC（長期のアクセスキーを使わない）。インフラの変更は自動化せず、手元で `terraform apply` する
 - ローカルDynamoDB互換: Docker Compose 内の moto。アプリコードは本番と同じ `boto3 + ddb_single` 経由にする。Lambda パッケージは `test-lambda` プロファイルで Lambda 公式ランタイム上の結合試験を行う
 
 `docker-compose.prod.yml` によるセルフホスト構成は代替手段として残す。

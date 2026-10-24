@@ -51,6 +51,8 @@ terraform -chdir=infra/aws init
 terraform -chdir=infra/aws apply
 ```
 
+初回のあとは、`main` へのマージで GitHub Actions が Lambda のコードを自動で更新します（インフラの変更は手元で `terraform apply`）。有効化の手順は [`infra/aws/README.md`](infra/aws/README.md) の「自動デプロイ」を参照してください。
+
 Lambda パッケージの結合テスト（Lambda 公式ランタイム + HTTP API 相当アダプタ越しに `integration_local.py`）:
 
 ```bash
