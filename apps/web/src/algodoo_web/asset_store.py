@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import shutil
 import tempfile
 import zipfile
@@ -25,6 +26,8 @@ from algodoo_domain.models import LegacyRoute
 from botocore.exceptions import ClientError
 
 from algodoo_web.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 # PHZ zip extraction caps (OWASP A04, issue #19): guard against zip bombs
 # before reading entries out of an uploaded archive.
@@ -167,7 +170,16 @@ def _read_upload_chunk(owner: str, upload_id: str, index: int) -> bytes | None:
             Key=_s3_object_key(f"{UPLOAD_TMP_PREFIX}/{path}"),
         )
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}:
+        code = exc.response.get("Error", {}).get("Code")
+        if code in {"NoSuchKey", "404"}:
+            return None
+        if code in {"AccessDenied", "403"}:
+            # Without s3:ListBucket, S3 answers GetObject for a missing key with
+            # 403 instead of 404. The Lambda role is deliberately object-scoped, so
+            # that is how a chunk that never arrived, belongs to someone else, or
+            # was expired by the lifecycle rule shows up. (A genuinely broken grant
+            # fails earlier, when the chunk is PUT.) Log it in case it is not that.
+            logger.warning("upload chunk %s/%s not readable (%s)", upload_id, index, code)
             return None
         raise
     return response["Body"].read()
