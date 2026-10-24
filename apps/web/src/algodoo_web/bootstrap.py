@@ -64,6 +64,12 @@ def _ensure_local_s3_bucket() -> None:
 
 def bootstrap_data() -> None:
     settings = get_data_settings()
+    if not settings.auto_create_table:
+        # IaC-provisioned table (Lambda): no local dependency to wait for.
+        init_table()
+        if settings.seed_demo_data:
+            seed_demo_data()
+        return
     last_error: Exception | None = None
     for _ in range(30):
         try:

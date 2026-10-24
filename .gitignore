@@ -24,3 +24,4 @@ apps/web/src/algodoo_web/media/
 test-results/
 tests/e2e/test-results/
 .playwright-mcp
+dist/

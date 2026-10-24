@@ -106,6 +106,32 @@ jobs:
         if: always()
         run: docker compose --profile test-cognito down --volumes
 
+  lambda:
+    name: Lambda Package Integration Test (Lambda runtime + HTTP API payload 2.0)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Build the Lambda zip and run the integration test through it
+        run: >
+          docker compose --profile test-lambda up
+          --abort-on-container-exit --exit-code-from integration-lambda
+
+      - name: Stop Lambda integration stack
+        if: always()
+        run: docker compose --profile test-lambda down --volumes
+
+      - name: Validate Terraform (infra/aws)
+        run: |
+          docker run --rm -v "$PWD/infra/aws:/w" -w /w hashicorp/terraform:1.10.5 init -backend=false -input=false
+          docker run --rm -v "$PWD/infra/aws:/w" -w /w hashicorp/terraform:1.10.5 fmt -check
+          docker run --rm -v "$PWD/infra/aws:/w" -w /w hashicorp/terraform:1.10.5 validate
+
   prod-image:
     name: Production Image + Compose Topology Test
     runs-on: ubuntu-latest

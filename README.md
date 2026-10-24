@@ -7,10 +7,10 @@
 ## 方針
 
 - UI と API は `FastAPI + Jinja2` で統合し、1 アプリとして動かす
-- 本番は Linux ホスト上の Docker Compose セルフホスト構成（`docker-compose.prod.yml`）
+- 本番は AWS サーバーレス構成（Lambda + API Gateway HTTP API、`infra/aws`）。代替として Docker Compose セルフホスト構成（`docker-compose.prod.yml`）も残す
 - 認証は Amazon Cognito（`AUTH_BACKEND=cognito`）。ローカル・CI は擬似セッション（`AUTH_BACKEND=local`）
-- DynamoDB 互換ストア（本番: compose 同梱の DynamoDB Local、ローカル: moto）を `ddb_single` の single-table 設計で使う
-- 添付ファイルは S3 互換ストア（本番: compose 同梱の MinIO、ローカル: moto）
+- DynamoDB（本番: on-demand テーブル、ローカル: moto）を `ddb_single` の single-table 設計で使う
+- 添付ファイルは S3（本番: 既存 bucket `img.algodooonline.net`、ローカル: moto）
 
 ## 構成
 
@@ -18,7 +18,8 @@
 - `packages/domain`: ドメインモデル
 - `packages/data`: DynamoDB single-table モデルとデータ層
 - `scripts`: ローカル起動・結合テスト・移行スクリプト
-- `Dockerfile` / `docker-compose.prod.yml` / `deploy/`: 本番実行基盤
+- `infra/aws`: 本番 AWS 構成（Terraform）
+- `Dockerfile` / `docker-compose.prod.yml` / `deploy/`: 代替のセルフホスト実行基盤
 
 ## 開始コマンド
 
@@ -40,7 +41,23 @@ docker compose up
 初回起動時にアプリが DynamoDB single-table を自動作成し、デモ用の thread/log/like を投入します。
 ローカル compose では DynamoDB と S3 の API 互換 `moto_server` を別コンテナとして立ち上げます。アプリ側のデータアクセスは `boto3 + ddb_single`、添付保存は `boto3` S3 client のままです。
 
-## 本番デプロイ（Linux ホスト + Docker Compose）
+## 本番デプロイ（AWS サーバーレス）
+
+Lambda + API Gateway HTTP API + DynamoDB on-demand + 既存 S3 / Cognito。アクセスが無ければ課金はストレージだけです。IaC は [`infra/aws`](infra/aws/README.md)（Terraform）にあり、切替・切り戻し手順もそこにまとめています。
+
+```bash
+sh scripts/build_lambda.sh          # dist/lambda.zip
+terraform -chdir=infra/aws init
+terraform -chdir=infra/aws apply
+```
+
+Lambda パッケージの結合テスト（Lambda 公式ランタイム + HTTP API 相当アダプタ越しに `integration_local.py`）:
+
+```bash
+docker compose --profile test-lambda up --abort-on-container-exit --exit-code-from integration-lambda
+```
+
+### 代替: Linux ホスト + Docker Compose
 
 ```bash
 cp .env.production.example .env.production   # プレースホルダを実値に置換
