@@ -32,9 +32,11 @@ terraform -chdir=infra/aws apply
 
 `main` への push で、`.github/workflows/ci.yml` の `deploy` ジョブが Lambda のコードだけを差し替えます。インフラ（IAM・API Gateway・DynamoDB など）は自動では変わらず、これまでどおり手元で `terraform plan` を見てから `apply` します。
 
-流れ: 全テスト通過 → `lambda` ジョブでテスト済みの zip を artifact に保存 → `deploy` ジョブが OIDC でロール `algodooonline-github-deploy` を引き受け → `update-function-code` → ハッシュ照合 → 本番ドメインのスモークテスト（`/healthz`、`/i/BBS`、ホーム）。zip のハッシュが本番と同じなら（ドキュメントだけの変更など）何もせず終了します。
+流れ: 全テスト通過 → `lambda` ジョブでテスト済みの zip を artifact に保存 → `deploy` ジョブが OIDC でロール `algodooonline-github-deploy` を引き受け → `update-function-code` → ハッシュ照合 → 本番ドメインのスモークテスト（`/healthz`、`/i/BBS`、ホーム）。
 
 - 認証は GitHub OIDC で、アクセスキーは GitHub に置きません。ロールを引き受けられるのは `medaka0213/algodooonline` の `main` ブランチ上の実行だけで、権限は `algodooonline-web` への `lambda:UpdateFunctionCode` と `lambda:GetFunction` に限っています。
+- zip は再現できません（同じコミットを 2 回ビルドしても、`.pyc` とパッケージの `RECORD`・`uv_cache.json` が違うためハッシュが変わります。ソースコードは同一です）。そのため、`main` への push は、ドキュメントだけの変更でも毎回 Lambda を差し替えます。差し替えは一瞬で切り替わり、直後にスモークテストが走ります。
+- ハッシュ照合は 2 か所です。更新前の照合は、同じ実行をそのまま再実行したとき（同じ artifact を使うので、ハッシュが本番と同じになる）だけ「何もしない」で終わらせます。更新後の照合は、テストした zip がそのまま AWS に入ったことを確かめます。
 - Lambda は `ignore_changes = [filename, source_code_hash]` にしてあり、CI がコードを更新しても `terraform plan` に差分は出ません。plan 時に zip ファイルは必要です（どのビルドでも構いません）。
 - 同時に走るデプロイは 1 つだけです。後のマージは先のデプロイが終わるまで待ちます。
 
