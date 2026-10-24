@@ -4,7 +4,7 @@
 {% set preset_title = form_title|default(none) %}
 {% set preset_content = form_content|default(none) %}
 {% set preset_filedata = form_filedata|default(none) %}
-<form method="post" action="{{ target_action }}">
+<form method="post" action="{{ target_action }}" data-max-body-bytes="{{ max_form_body_bytes|default(0) }}" data-max-upload-bytes="{{ max_upload_bytes|default(0) }}" data-upload-chunk-bytes="{{ upload_chunk_bytes|default(0) }}">
   <div class="form-group">
     <label>title
       <input class="form-control" name="title" value="{{ preset_title if preset_title is not none else (target_thread.title if target_thread else '') }}" required maxlength="32" />
@@ -37,7 +37,9 @@
   <div class="form-group"{% if active_route.value in ["IMAGE", "DATA"] %} hidden{% endif %}>
     <label>filedata
       {# maxlength tracks the 20MB request-body cap (MAX_REQUEST_BODY_BYTES in main.py, issue #19);
-         each individual data URL is further capped at MAX_UPLOAD_BYTES (10MB) in algodoo_data/uploads.py. #}
+         each individual data URL is further capped at MAX_UPLOAD_BYTES (10MB) in algodoo_data/uploads.py.
+         Behind API Gateway + Lambda the whole body must stay under max_form_body_bytes (see config.py);
+         the form script checks that before posting. #}
       <textarea class="form-control" id="filedata-{{ target_thread.thread_id if target_thread else 'new' }}" name="filedata" maxlength="20000000">{% if preset_filedata is not none %}{{ preset_filedata }}{% elif target_thread %}{% for file in target_thread.filedata %}{{ file }}
 {% endfor %}{% endif %}</textarea>
     </label>

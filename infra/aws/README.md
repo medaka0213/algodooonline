@@ -17,6 +17,14 @@
 
 state は `guppy-terraform-state` の `algodooonline/terraform.tfstate`（`guppy-monorepo/deploy/terraform/cognito` と同じバケット・別キー）。
 
+## 制約と大きいファイル
+
+- **1 回のリクエストは約 4.7MB まで**：Lambda の呼び出しペイロード上限（6MB）を、API Gateway が本文を base64 化した後に超えると、アプリに届く前に API Gateway が素の 413 を返します。本番で実測した境界は 4,718,592 バイト（4.5 MiB）です。
+- **大きいファイルは分割して送る**：Data URL で 1 回の投稿に入るのは約 3MB までなので、それより大きいファイルは、ブラウザが 2 MiB ずつに分けて `PUT /uploads/{id}/{index}` で送り、投稿フォームは `upload:` の参照だけを送ります（SPEC §13.4）。1 ファイルの上限は 10MB です。
+- チャンクは Lambda の呼び出しをまたいで共有する必要があるため、アセット用バケット `img.algodooonline.net` の `UPLOAD-TMP/` 配下に ACL なし（非公開）で置きます。Lambda のロールに、この接頭辞への `s3:PutObject` / `GetObject` / `DeleteObject` を許可し、`s3_upload_tmp.tf` のライフサイクルルールで 1 日後に消します。このバケットはバージョニングが有効なので、削除は旧バージョンとして残ります。そのため、旧バージョンの期限切れと、空になった削除マーカーの掃除もルールに含めています。
+- **ライフサイクル設定はバケットに 1 つだけ**：`s3_upload_tmp.tf` が、このバケットのライフサイクル設定全体を管理します（作成時点では未設定でした）。他のルールを足すときは、ここに足してください。
+- **反映の順序**：コードは `UPLOAD-TMP/` への書き込み権限がないと分割アップロードに失敗します。マージ（自動デプロイ）より前に `terraform apply` で権限を入れてください。
+
 ## デプロイ
 
 ```bash

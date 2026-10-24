@@ -59,6 +59,17 @@ data "aws_iam_policy_document" "lambda" {
       "arn:aws:s3:::${var.asset_bucket}/DATA/*",
     ]
   }
+
+  # Chunks of files too big for one request wait here until the thread form
+  # references them (SPEC 13.4). Written without an ACL, so they stay private;
+  # s3_upload_tmp.tf expires them.
+  statement {
+    sid     = "UploadChunks"
+    actions = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
+    resources = [
+      "arn:aws:s3:::${var.asset_bucket}/${var.upload_tmp_prefix}/*",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda" {

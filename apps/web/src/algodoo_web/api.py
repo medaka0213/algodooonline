@@ -188,6 +188,7 @@ def api_create_thread(
         route=lr,
         thread_id=thread.thread_id,
         filedata=files,
+        owner=sub,
     )
     if nerr:
         delete_thread(lr, thread.thread_id)
@@ -224,7 +225,9 @@ def api_update_thread(
     if files is not None:
         if err := validate_thread_filedata(lr, files):
             return _result_error({"filedata": err})
-        keys, nerr = normalize_and_persist_filedata(route=lr, thread_id=thread_id, filedata=files)
+        keys, nerr = normalize_and_persist_filedata(
+            route=lr, thread_id=thread_id, filedata=files, owner=sub
+        )
         if nerr:
             return _result_error({"filedata": nerr})
         files = keys

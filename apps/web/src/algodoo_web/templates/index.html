@@ -547,6 +547,46 @@
           }
         });
       });
+      // Behind API Gateway + Lambda a post larger than ~4.7 MB is rejected with
+      // a bare 413 before the app can say anything. Measure the exact urlencoded
+      // body the browser will send (several images, long text, base64 and
+      // percent-encoding growth all included) and stop the post with an
+      // explanation instead.
+      function updateSizeError(form) {
+        var limit = parseInt(form.dataset.maxBodyBytes || "0", 10);
+        var err = form.querySelector(".form-error[data-size-error]");
+        var size = limit ? new URLSearchParams(new FormData(form)).toString().length : 0;
+        if (!limit || size <= limit) {
+          if (err) err.remove();
+          return false;
+        }
+        // Attachments dominate the body; as data URLs they grow ~1.42x
+        // (base64 plus percent-encoding), so translate the overshoot to file bytes.
+        var cutMb = Math.ceil((size - limit) / 1.42 / 100000) / 10;
+        if (!err) {
+          err = document.createElement("p");
+          err.className = "form-error";
+          err.setAttribute("data-size-error", "");
+          form.insertBefore(err, form.firstChild);
+        }
+        err.textContent =
+          "送信データが大きすぎます (約 " + (size / 1000000).toFixed(1) + " MB / 上限 " + (limit / 1000000).toFixed(1) + " MB)。" +
+          "添付ファイルを約 " + cutMb.toFixed(1) + " MB 以上小さくするか、枚数を減らしてください。";
+        return true;
+      }
+      document.querySelectorAll("form[data-max-body-bytes]").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+          if (form.dataset.uploading) {
+            event.preventDefault();
+            clearUploadError(form);
+            showUploadError(form, "ファイルをアップロード中です。完了してから送信してください。");
+            return;
+          }
+          if (!updateSizeError(form)) return;
+          event.preventDefault();
+          form.querySelector(".form-error[data-size-error]").scrollIntoView({ block: "nearest" });
+        });
+      });
       document.querySelectorAll("[data-open-modal]").forEach(function (button) {
         button.addEventListener("click", function (event) {
           event.preventDefault();
@@ -677,47 +717,232 @@
             });
         });
       }
+      // Files too big for one form post (API Gateway + Lambda carries ~4.7 MB per
+      // request) are PUT to /uploads in chunks, and the form then carries only an
+      // `upload:{id}:{chunks}:{size}:{mime}` reference. Small files stay inline as
+      // Data URLs: no extra requests, and nothing about their handling changes.
+      var INLINE_FILE_CHARS = 1000000;
+      var INLINE_TOTAL_CHARS = 2000000;
+      function randomUploadId() {
+        var bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        return Array.prototype.map
+          .call(bytes, function (b) {
+            return ("0" + b.toString(16)).slice(-2);
+          })
+          .join("");
+      }
+      function dataUrlMime(dataUrl) {
+        return dataUrl.slice(5, dataUrl.indexOf(";")).toLowerCase();
+      }
+      function dataUrlBytes(dataUrl) {
+        var b64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+        var padding = b64.slice(-2) === "==" ? 2 : b64.slice(-1) === "=" ? 1 : 0;
+        return Math.floor((b64.length * 3) / 4) - padding;
+      }
+      // fetch(dataUrl) would be blocked by the CSP (connect-src 'self'), so decode by hand.
+      function dataUrlToBlob(dataUrl) {
+        var bin = atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new Blob([bytes], { type: dataUrlMime(dataUrl) });
+      }
+      function putChunk(url, blob, attempt) {
+        return fetch(url, {
+          method: "PUT",
+          body: blob,
+          headers: { "Content-Type": "application/octet-stream" },
+          credentials: "same-origin",
+        }).then(
+          function (res) {
+            if (res.ok) return;
+            if (attempt < 2 && res.status >= 500) return putChunk(url, blob, attempt + 1);
+            throw new Error("HTTP " + res.status);
+          },
+          function (err) {
+            if (attempt < 2) return putChunk(url, blob, attempt + 1);
+            throw err;
+          }
+        );
+      }
+      function uploadInChunks(dataUrl, chunkBytes, onProgress) {
+        var blob = dataUrlToBlob(dataUrl);
+        var id = randomUploadId();
+        var count = Math.ceil(blob.size / chunkBytes);
+        var index = 0;
+        function next() {
+          if (index >= count) {
+            return Promise.resolve("upload:" + id + ":" + count + ":" + blob.size + ":" + blob.type);
+          }
+          onProgress(index, count);
+          var piece = blob.slice(index * chunkBytes, (index + 1) * chunkBytes);
+          var url = "/uploads/" + id + "/" + index;
+          index += 1;
+          return putChunk(url, piece, 0).then(next);
+        }
+        return next();
+      }
+      function toDataUrl(result, file, wantJpeg) {
+        return new Promise(function (resolve, reject) {
+          if (!(wantJpeg && typeof result === "string" && result.indexOf("image/jpeg") !== 5)) {
+            resolve(normalizeDataUrlMime(result, file.name));
+            return;
+          }
+          var img = new Image();
+          img.onload = function () {
+            try {
+              var c = document.createElement("canvas");
+              c.width = img.naturalWidth;
+              c.height = img.naturalHeight;
+              c.getContext("2d").drawImage(img, 0, 0);
+              result = c.toDataURL("image/jpeg", 0.92);
+            } catch (e) {}
+            resolve(result);
+          };
+          img.onerror = function () {
+            reject(new Error("not an image"));
+          };
+          img.src = result;
+        });
+      }
+      function showUploadError(form, message) {
+        if (!form) return;
+        var err = form.querySelector(".form-error[data-upload-error]");
+        if (!err) {
+          err = document.createElement("p");
+          err.className = "form-error";
+          err.setAttribute("data-upload-error", "");
+          form.insertBefore(err, form.firstChild);
+          err.textContent = message;
+        } else {
+          err.textContent += "\n" + message;
+        }
+      }
+      function clearUploadError(form) {
+        var err = form && form.querySelector(".form-error[data-upload-error]");
+        if (err) err.remove();
+      }
+      function megabytes(bytes) {
+        return (bytes / 1048576).toFixed(1) + " MB";
+      }
       document.querySelectorAll("[data-file-input]").forEach(function (input) {
         input.addEventListener("change", function () {
           var target = document.querySelector(input.dataset.fileInput);
           var list = document.querySelector(input.dataset.fileList);
           var preview = input.dataset.filePreview ? document.querySelector(input.dataset.filePreview) : null;
           if (!target) return;
-          var names = [];
-          var loaded = [];
+          var form = input.closest("form");
+          var maxUpload = parseInt((form && form.dataset.maxUploadBytes) || "0", 10);
+          var chunkBytes = parseInt((form && form.dataset.uploadChunkBytes) || "0", 10) || 2097152;
           var wantJpeg = input.dataset.requireJpeg === "1";
+          // A newer selection supersedes this one; late results are dropped.
+          var token = (input._selection = (input._selection || 0) + 1);
+          var slots = Array.prototype.map.call(input.files || [], function (file) {
+            return { name: file.name, value: "", preview: "", status: "読み込み中", done: false };
+          });
+          var inlineChars = 0;
+          var pending = slots.length;
+          clearUploadError(form);
           function sync() {
-            target.value = loaded.join("\n");
-            if (list) list.textContent = names.length + "件: " + names.join(", ");
-            renderFilePreview(preview, loaded);
+            if (input._selection !== token) return;
+            target.value = slots
+              .map(function (slot) {
+                return slot.value;
+              })
+              .filter(Boolean)
+              .join("\n");
+            if (list) {
+              list.textContent =
+                slots.length +
+                "件: " +
+                slots
+                  .map(function (slot) {
+                    return slot.name + (slot.status ? " (" + slot.status + ")" : "");
+                  })
+                  .join(", ");
+            }
+            renderFilePreview(
+              preview,
+              slots
+                .map(function (slot) {
+                  return slot.preview;
+                })
+                .filter(Boolean)
+            );
+            if (form) {
+              form.dataset.uploading = pending > 0 ? "1" : "";
+              form.querySelectorAll("button[type=submit]").forEach(function (button) {
+                button.disabled = pending > 0;
+              });
+              updateSizeError(form);
+            }
           }
-          Array.prototype.forEach.call(input.files || [], function (file) {
-            names.push(file.name);
+          function finish(slot, status) {
+            if (slot.done) return;
+            slot.done = true;
+            slot.status = status;
+            pending -= 1;
+            sync();
+          }
+          function fail(slot, message) {
+            slot.value = "";
+            slot.preview = "";
+            if (input._selection === token) showUploadError(form, message);
+            finish(slot, "失敗");
+          }
+          function tooBig(slot, bytes) {
+            fail(
+              slot,
+              slot.name + " は大きすぎます (" + megabytes(bytes) + " / 1ファイルあたり上限 " + megabytes(maxUpload) + ")"
+            );
+          }
+          Array.prototype.forEach.call(input.files || [], function (file, i) {
+            var slot = slots[i];
+            // Non-image files are sent as they are: refuse before even reading them.
+            if (!wantJpeg && maxUpload && file.size > maxUpload) {
+              tooBig(slot, file.size);
+              return;
+            }
             var reader = new FileReader();
+            reader.onerror = function () {
+              fail(slot, slot.name + " を読み込めませんでした");
+            };
             reader.onload = function () {
-              var result = reader.result;
-              if (wantJpeg && typeof result === "string" && result.indexOf("image/jpeg") !== 5) {
-                var img = new Image();
-                img.onload = function () {
-                  try {
-                    var c = document.createElement("canvas");
-                    c.width = img.naturalWidth;
-                    c.height = img.naturalHeight;
-                    var ctx = c.getContext("2d");
-                    ctx.drawImage(img, 0, 0);
-                    result = c.toDataURL("image/jpeg", 0.92);
-                  } catch (e) {}
-                  loaded.push(result);
+              toDataUrl(reader.result, file, wantJpeg)
+                .then(function (dataUrl) {
+                  var bytes = dataUrlBytes(dataUrl);
+                  if (maxUpload && bytes > maxUpload) {
+                    tooBig(slot, bytes);
+                    return;
+                  }
+                  slot.preview = dataUrl;
+                  if (dataUrl.length <= INLINE_FILE_CHARS && inlineChars + dataUrl.length <= INLINE_TOTAL_CHARS) {
+                    inlineChars += dataUrl.length;
+                    slot.value = dataUrl;
+                    finish(slot, "");
+                    return;
+                  }
+                  slot.status = "アップロード中";
                   sync();
-                };
-                img.src = result;
-              } else {
-                loaded.push(normalizeDataUrlMime(result, file.name));
-                sync();
-              }
+                  return uploadInChunks(dataUrl, chunkBytes, function (sent, total) {
+                    slot.status = "アップロード中 " + (sent + 1) + "/" + total;
+                    sync();
+                  })
+                    .then(function (ref) {
+                      slot.value = ref;
+                      finish(slot, "アップロード済み");
+                    })
+                    .catch(function () {
+                      fail(slot, slot.name + " のアップロードに失敗しました。もう一度選び直してください。");
+                    });
+                })
+                .catch(function () {
+                  fail(slot, slot.name + " を処理できませんでした。ファイルを選び直してください。");
+                });
             };
             reader.readAsDataURL(file);
           });
+          sync();
         });
       });
       // After a server-side validation error the Data URLs come back in the
@@ -729,6 +954,11 @@
         var source = document.querySelector(preview.dataset.previewSource);
         if (!source || !source.value) return;
         var values = source.value.split("\n");
+        var uploadRefs = values.filter(function (value) {
+          return value.indexOf("upload:") === 0;
+        });
+        var listEl = document.getElementById(preview.id.replace("file-preview-", "file-list-"));
+        if (uploadRefs.length && listEl) listEl.textContent = uploadRefs.length + "件: アップロード済み";
         var hasDataUrl = values.some(function (value) {
           return value.indexOf("data:") === 0;
         });

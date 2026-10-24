@@ -5,6 +5,8 @@ Bytes are generated on the fly so no binary fixtures are committed to git.
 
 from __future__ import annotations
 
+import base64
+import os
 import zipfile
 from pathlib import Path
 
@@ -34,4 +36,16 @@ def make_phz(tmp_path: Path, name: str = "scene.phz") -> Path:
 def make_phn(tmp_path: Path, name: str = "scene.phn") -> Path:
     path = tmp_path / name
     path.write_text("# e2e phn scene\n", encoding="utf-8")
+    return path
+
+
+def make_big_phz(tmp_path: Path, filler_bytes: int, name: str = "big.phz") -> Path:
+    """A valid PHZ made big by a stored (not deflated) scene.phn, so it needs chunked upload."""
+    path = tmp_path / name
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        scene = zipfile.ZipInfo("scene.phn")
+        scene.compress_type = zipfile.ZIP_STORED
+        zf.writestr(scene, base64.b64encode(os.urandom(filler_bytes * 3 // 4)).decode())
+        zf.writestr("checksums.txt", "sha256 placeholder\n")
+        zf.writestr("thumb.png", MIN_PNG)
     return path

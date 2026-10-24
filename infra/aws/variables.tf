@@ -38,6 +38,18 @@ variable "asset_bucket" {
   default     = "img.algodooonline.net"
 }
 
+variable "upload_tmp_prefix" {
+  description = "Key prefix in the asset bucket for chunks of in-progress uploads (UPLOAD_TMP_PREFIX in asset_store.py)."
+  type        = string
+  default     = "UPLOAD-TMP"
+}
+
+variable "upload_tmp_expire_days" {
+  description = "Chunks left behind by abandoned uploads are deleted after this many days."
+  type        = number
+  default     = 1
+}
+
 variable "asset_public_base_url" {
   type    = string
   default = "https://img.algodooonline.net"
