@@ -36,6 +36,9 @@ reviews:
     enabled: true
     # push のたびに差分を再レビューする
     auto_incremental_review: true
+    # 既定の 5 だとレビュー済みコミットが 5 つで自動レビューが止まるので無効化する
+    # （レビュー回数の上限に当たるようなら 1〜2 にすると早めに止まる）
+    auto_pause_after_reviewed_commits: 0
     # draft のうちはレビューしない（ready for review で走る）
     drafts: false
     ignore_title_keywords:
